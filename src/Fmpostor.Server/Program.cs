@@ -1,0 +1,380 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Text.Json;
+using System.Reflection;
+using System.Runtime.Loader;
+using System.Threading;
+using System.Threading.Tasks;
+using Fmpostor.Api.Config;
+using Fmpostor.Api.Events;
+using Fmpostor.Api.Events.Managers;
+using Fmpostor.Api.Games;
+using Fmpostor.Api.Games.Managers;
+using Fmpostor.Api.Net.Custom;
+using Fmpostor.Api.Net.Manager;
+using Fmpostor.Api.Plugins;
+using Fmpostor.Api.Utils;
+using Impostor.Hazel.Extensions;
+using Fmpostor.Server.Events;
+using Fmpostor.Server.Http;
+using Fmpostor.Server.Net;
+using Fmpostor.Server.Net.Custom;
+using Fmpostor.Server.Net.Factories;
+using Fmpostor.Server.Net.Manager;
+using Fmpostor.Server.Net.Messages;
+using Fmpostor.Server.Plugins;
+using Fmpostor.Server.Recorder;
+using Fmpostor.Server.Utils;
+using Fmpostor.Server.WebAdmin;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.ObjectPool;
+using Serilog;
+using Serilog.Events;
+using Serilog.Settings.Configuration;
+
+namespace Fmpostor.Server
+{
+    internal static class Program
+    {
+        private static int Main(string[] args)
+        {
+            Log.Logger = new LoggerConfiguration()
+                .WriteTo.Console()
+                .CreateBootstrapLogger();
+
+            try
+            {
+                // Avoid thread-pool starvation under many concurrent clients: make sure
+                // async continuations can always find worker threads on multi-core boxes.
+                var minThreads = Math.Max(4, Environment.ProcessorCount);
+                ThreadPool.SetMinThreads(minThreads, minThreads);
+
+                // 启动时不再显示 Impostor 版本号
+                var host = CreateHostBuilder(args).Build();
+
+                // Force the auth service to initialize at startup so webadmin_auth.json is
+                // created (or rewritten to the current plaintext format) before the server
+                // starts accepting requests.
+                host.Services.GetRequiredService<WebAdminAuthService>();
+
+                host.Run();
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal(ex, "Fmpostor terminated unexpectedly");
+                return 1;
+            }
+            finally
+            {
+                Log.CloseAndFlush();
+            }
+        }
+
+        private static IConfiguration CreateConfiguration(string[] args)
+        {
+            var configurationBuilder = new ConfigurationBuilder();
+
+            configurationBuilder.SetBasePath(Directory.GetCurrentDirectory());
+            configurationBuilder.AddJsonFile("config.json", true);
+            configurationBuilder.AddJsonFile("config.Development.json", true);
+            configurationBuilder.AddEnvironmentVariables(prefix: "FMPOSTOR_");
+            configurationBuilder.AddCommandLine(args);
+
+            return configurationBuilder.Build();
+        }
+
+
+        private static string GetServerIp(ServerConfig? serverConfig)
+        {            if (serverConfig != null && !string.IsNullOrEmpty(serverConfig.PublicIp) && serverConfig.PublicIp != "127.0.0.1" && serverConfig.PublicIp != "0.0.0.0")
+                return serverConfig.PublicIp;
+            try
+            {
+                foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                    var ip = ni.GetIPProperties().UnicastAddresses
+                        .FirstOrDefault(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a.Address));
+                    if (ip != null) return ip.Address.ToString();
+                }
+            }
+            catch { }
+            return "0.0.0.0";
+        }
+
+        private static IHostBuilder CreateHostBuilder(string[] args)
+        {
+            var configuration = CreateConfiguration(args);
+            var pluginConfig = configuration.GetSection("PluginLoader")
+                .Get<PluginConfig>() ?? new PluginConfig();
+            var httpConfig = configuration.GetSection(HttpServerConfig.Section)
+                .Get<HttpServerConfig>() ?? new HttpServerConfig();
+
+            var hostBuilder = Host.CreateDefaultBuilder(args)
+                .UseContentRoot(Directory.GetCurrentDirectory())
+#if DEBUG
+                .UseEnvironment(Environment.GetEnvironmentVariable("FMPOSTOR_ENV") ?? "Development")
+#else
+                .UseEnvironment("Production")
+#endif
+                .ConfigureAppConfiguration(builder =>
+                {
+                    builder.AddConfiguration(configuration);
+                })
+                .ConfigureServices((host, services) =>
+                {
+                    var debug = host.Configuration
+                        .GetSection(DebugConfig.Section)
+                        .Get<DebugConfig>() ?? new DebugConfig();
+
+                    services.AddSingleton<ServerEnvironment>();
+                    services.AddSingleton<IServerEnvironment>(p => p.GetRequiredService<ServerEnvironment>());
+                    services.AddSingleton<IDateTimeProvider, RealDateTimeProvider>();
+
+                    services.Configure<DebugConfig>(host.Configuration.GetSection(DebugConfig.Section));
+                    services.Configure<AntiCheatConfig>(host.Configuration.GetSection(AntiCheatConfig.Section));
+                    services.Configure<CompatibilityConfig>(host.Configuration.GetSection(CompatibilityConfig.Section));
+                    services.Configure<ServerConfig>(host.Configuration.GetSection(ServerConfig.Section));
+                    services.Configure<TimeoutConfig>(host.Configuration.GetSection(TimeoutConfig.Section));
+                    services.Configure<HttpServerConfig>(host.Configuration.GetSection(HttpServerConfig.Section));
+                    services.Configure<WebAdminConfig>(host.Configuration.GetSection(WebAdminConfig.Section));
+
+                    services.AddSingleton<ICompatibilityManager, CompatibilityManager>();
+                    services.AddSingleton<ClientManager>();
+                    services.AddSingleton<IClientManager>(p => p.GetRequiredService<ClientManager>());
+
+                    if (debug.GameRecorderEnabled)
+                    {
+                        services.AddSingleton<ObjectPoolProvider>(new DefaultObjectPoolProvider());
+                        services.AddSingleton<ObjectPool<PacketSerializationContext>>(serviceProvider =>
+                        {
+                            var provider = serviceProvider.GetRequiredService<ObjectPoolProvider>();
+                            var policy = new PacketSerializationContextPooledObjectPolicy();
+                            return provider.Create(policy);
+                        });
+
+                        services.AddSingleton<PacketRecorder>();
+                        services.AddHostedService(sp => sp.GetRequiredService<PacketRecorder>());
+                        services.AddSingleton<IClientFactory, ClientFactory<ClientRecorder>>();
+                    }
+                    else
+                    {
+                        services.AddSingleton<IClientFactory, ClientFactory<Client>>();
+                    }
+
+                    services.AddSingleton<GameManager>();
+                    services.AddSingleton<IGameManager>(p => p.GetRequiredService<GameManager>());
+                    services.AddSingleton<ListingManager>();
+
+                    services.AddEventPools();
+                    services.AddHazel();
+                    services.AddSingleton<ICustomMessageManager<ICustomRootMessage>, CustomMessageManager<ICustomRootMessage>>();
+                    services.AddSingleton<ICustomMessageManager<ICustomRpc>, CustomMessageManager<ICustomRpc>>();
+                    services.AddSingleton<IMessageWriterProvider, MessageWriterProvider>();
+                    services.AddSingleton<IGameCodeFactory>(p => p.GetRequiredService<CustomGameCodeService>());
+                    services.AddSingleton<IEventManager, EventManager>();
+                    services.AddSingleton<Matchmaker>();
+                    services.AddSingleton<IDeltaListenerManager>(p => p.GetRequiredService<Matchmaker>());
+                    services.AddHostedService<MatchmakerService>();
+
+                    // WebAdmin services
+                    services.AddSingleton<WebAdminAuthService>();
+                    services.AddSingleton<BanDatabase>();
+                    services.AddSingleton<BanService>();
+                    services.AddSingleton<GameTrackerService>();
+                    services.AddSingleton<ChatService>();
+                    services.AddSingleton<LogService>();
+                    services.AddSingleton<GameEventHandler>();
+                    services.AddSingleton<PlayerIdentityService>();
+                    services.AddSingleton<ConnectionLogger>();
+                    services.AddSingleton<IEventListener>(p => p.GetRequiredService<GameEventHandler>());
+
+                    // Turbo500 new services
+                    services.AddSingleton<WebAdminSettingsService>();
+                    services.AddSingleton<DeltaPortPoolService>();
+                    services.AddSingleton<BadWordFilterService>();
+                    services.AddSingleton<WelcomeService>();
+                    services.AddSingleton<ReportService>();
+                    services.AddSingleton<PlayerLogService>();
+                    services.AddSingleton<PlayerStatsService>();
+                    services.AddSingleton<ReactorModService>();
+                    services.AddSingleton<CustomGameCodeService>();
+                    services.AddSingleton<IEventListener>(p => p.GetRequiredService<CustomGameCodeService>());
+
+                    // Turbo500 innovations
+                    services.AddSingleton<BroadcastService>();
+                    services.AddSingleton<GameReplayService>();
+                    services.AddSingleton<IEventListener>(p => p.GetRequiredService<GameReplayService>());
+                    services.AddSingleton<PlayerFootprintService>();
+                    services.AddSingleton<RoomCleanupService>();
+                    services.AddSingleton<DashboardService>();
+
+                    // Turbo510 AI assistant (depends on PlayerLogService /
+                    // PlayerStatsService / PlayerFootprintService / GameReplayService /
+                    // ChatService / ReportService — all singletons above, no cycles).
+                    services.AddSingleton<AiService>();
+
+                    // Turbo520 integrated plugin features: titles (/title),
+                    // play-time tracking (welcome data), auto-start (/auto),
+                    // QQ room monitor (/m + OneBot), host transfer (/nexthost).
+                    services.AddSingleton<PlayerTimeService>();
+                    services.AddHostedService(p => p.GetRequiredService<PlayerTimeService>());
+                    services.AddSingleton<TitleService>();
+                    services.AddSingleton<IEventListener>(p => p.GetRequiredService<TitleService>());
+                    services.AddSingleton<AutoStartService>();
+                    services.AddSingleton<IEventListener>(p => p.GetRequiredService<AutoStartService>());
+                    services.AddSingleton<AdminStatsService>();
+                    services.AddSingleton<RoomMonitorService>();
+                    services.AddSingleton<IEventListener>(p => p.GetRequiredService<RoomMonitorService>());
+                    services.AddSingleton<ScheduleService>();
+                    services.AddSingleton<RoomTransferService>();
+                    services.AddHttpClient();
+
+                    // Startup banner (open-source edition): no ownership/periodic
+                    // verification anymore — the server starts unconditionally.
+                    ColorWrite("\n╔══════════════════════════════════════════╗", ConsoleColor.Cyan);
+                    ColorWrite("║  欢迎使用帆船的 Impostor 服务端     ║", ConsoleColor.Yellow);
+                    ColorWrite("╚══════════════════════════════════════════╝\n", ConsoleColor.Cyan);
+                    ColorWrite("1. 欢迎使用帆船Impostor服务端", ConsoleColor.White);
+                    ColorWrite("2. 正在准备启动", ConsoleColor.White);
+                    Thread.Sleep(800);
+                })
+                .UseSerilog((context, loggerConfiguration) =>
+                {
+#if DEBUG
+                    var logLevel = LogEventLevel.Debug;
+#else
+                    var logLevel = LogEventLevel.Information;
+#endif
+
+                    if (args.Contains("--verbose"))
+                    {
+                        logLevel = LogEventLevel.Verbose;
+                    }
+                    else if (args.Contains("--errors-only"))
+                    {
+                        logLevel = LogEventLevel.Error;
+                    }
+
+                    static Assembly? LoadSerilogAssembly(AssemblyLoadContext loadContext, AssemblyName name)
+                    {
+                        var paths = new[] { AppDomain.CurrentDomain.BaseDirectory, Directory.GetCurrentDirectory() };
+                        foreach (var path in paths)
+                        {
+                            try
+                            {
+                                return loadContext.LoadFromAssemblyPath(Path.Combine(path, name.Name + ".dll"));
+                            }
+                            catch (FileNotFoundException)
+                            {
+                            }
+                        }
+
+                        return null;
+                    }
+
+                    AssemblyLoadContext.Default.Resolving += LoadSerilogAssembly;
+
+                    loggerConfiguration
+                        .MinimumLevel.Is(logLevel)
+#if DEBUG
+                        .MinimumLevel.Override("Microsoft", LogEventLevel.Debug)
+#else
+                        .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+#endif
+                        .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+                        .Enrich.FromLogContext()
+                        .WriteTo.Console()
+                        .ReadFrom.Configuration(context.Configuration, new ConfigurationReaderOptions(ConfigurationAssemblySource.AlwaysScanDllFiles));
+
+                    AssemblyLoadContext.Default.Resolving -= LoadSerilogAssembly;
+                })
+                .UseConsoleLifetime()
+                .UsePluginLoader(pluginConfig);
+
+            if (httpConfig.Enabled)
+            {
+                hostBuilder.ConfigureWebHostDefaults(builder =>
+                {
+                    builder.ConfigureServices(services =>
+                    {
+                        services.AddControllers();
+                    });
+
+                    builder.Configure(app =>
+                    {
+                        // CORS: when WebAdmin.CorsAllowedOrigins is configured, only those
+                        // origins may call the API cross-origin; otherwise keep the legacy
+                        // any-origin (credentials are never allowed) behaviour.
+                        var corsOrigins = configuration.GetSection(WebAdminConfig.Section).Get<WebAdminConfig>()?.CorsAllowedOrigins ?? new System.Collections.Generic.List<string>();
+                        var validOrigins = corsOrigins.Where(o => !string.IsNullOrWhiteSpace(o)).ToArray();
+                        if (validOrigins.Length > 0)
+                        {
+                            app.UseCors(policy => policy.WithOrigins(validOrigins).AllowAnyMethod().AllowAnyHeader());
+                        }
+                        else
+                        {
+                            app.UseCors(policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+                        }
+
+                        // Security hardening (Turbo-620): response headers, request body caps,
+                        // CSRF origin checks and the default-password lockdown.
+                        app.UseMiddleware<SecurityHeadersMiddleware>();
+                        app.UseMiddleware<RequestBodyLimitMiddleware>();
+                        app.UseMiddleware<WebAdminCsrfMiddleware>();
+                        app.UseMiddleware<WebAdminPendingPasswordMiddleware>();
+
+                        // Start the scheduled-task engine with the panel.
+                        app.ApplicationServices.GetRequiredService<ScheduleService>().Start();
+
+                        // 启动完成提示（开源版，无验证环节）
+                        app.ApplicationServices.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.Register(() =>
+                        {
+                            ColorWrite("3. 启动成功，腐竹，欢迎回来！", ConsoleColor.Green);
+                            ColorWrite("4. ⚠ Warning: Most of this server's source code was generated by AI. If you encounter any bugs while using it, feedback is welcome at admin@fanchuanovo.cn", ConsoleColor.Yellow);
+                        });
+
+                        var pluginLoaderService = app.ApplicationServices.GetRequiredService<PluginLoaderService>();
+                        foreach (var pluginInformation in pluginLoaderService.Plugins)
+                        {
+                            if (pluginInformation.Startup is IPluginHttpStartup httpStartup)
+                            {
+                                httpStartup.ConfigureWebApplication(app);
+                            }
+                        }
+
+                        app.UseRouting();
+
+                        app.UseEndpoints(endpoints =>
+                        {
+                            endpoints.MapControllers();
+                        });
+                    });
+
+                    builder.ConfigureKestrel(serverOptions =>
+                    {
+                        serverOptions.Listen(IPAddress.Parse(httpConfig.ListenIp), httpConfig.ListenPort);
+                    });
+                });
+            }
+
+            return hostBuilder;
+        }
+
+        private static void ColorWrite(string text, ConsoleColor color)
+        {
+            Console.ForegroundColor = color;
+            Console.WriteLine(text);
+            Console.ResetColor();
+        }
+    }
+}

@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <!-- Turbo-620 Enterprise UI. CSP 基线：面板使用内联处理器与用户自定义服务器地址 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <title>帆船控制台 · Among Us 服务器管理</title>
+  <link rel="stylesheet" href="css/style.css?v=6200912">
+</head>
+<body>
+
+  <!-- ==================== 登录 ==================== -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-inner">
+      <div class="login-hero">
+        <div class="hero-mark">⚓</div>
+        <h1>帆船控制台</h1>
+        <p class="hero-sub">不止是私服 —— 带 AI 管家、行为审计与自动运营的 Among Us 服务器管理平台</p>
+        <div class="hero-grid">
+          <div class="hero-card"><span class="h-ico">🪪</span><div><h5>真实好友码</h5><p>自建网关直连官方，好友码/PUID 非占位符</p></div></div>
+          <div class="hero-card"><span class="h-ico">🤖</span><div><h5>AI 管家</h5><p>一句话查数据；Agent 自动执行面板操作</p></div></div>
+          <div class="hero-card"><span class="h-ico">📼</span><div><h5>对局复盘</h5><p>身份分配 / 击杀链 / 投票时间线全存档</p></div></div>
+          <div class="hero-card"><span class="h-ico">⏰</span><div><h5>定时任务 + AI</h5><p>定时发消息、清数据，还能定时让 AI 干活</p></div></div>
+          <div class="hero-card"><span class="h-ico">🛡️</span><div><h5>全链路审计</h5><p>举报/进出服/聊天/IP 足迹留痕，一键封禁</p></div></div>
+          <div class="hero-card"><span class="h-ico">📣</span><div><h5>QQ 群联动</h5><p>开房满员实时推送，欢迎语自动带房间号</p></div></div>
+          <div class="hero-card"><span class="h-ico">🎖️</span><div><h5>称号系统</h5><p>游戏内昵称旁显示自定义称号</p></div></div>
+          <div class="hero-card"><span class="h-ico">🔐</span><div><h5>白名单验证</h5><p>IP 白名单授权体系，专属私服防搭设</p></div></div>
+        </div>
+        <div class="hero-foot">另有：房间码池 · 多端口池 · 违禁词过滤 · 24 页数据大屏</div>
+      </div>
+      <div class="login-side">
+        <div class="login-card">
+          <div class="login-head">
+            <div class="brand-mark">⚓</div>
+            <h2>登录控制台</h2>
+            <p>连接到你的帆船服务器 · Turbo-620</p>
+          </div>
+          <div class="login-body">
+            <div class="form-group">
+              <label>服务器地址（完整 URL）</label>
+              <input type="url" id="serverAddr" placeholder="http://IP:端口 或 https://域名:端口">
+            </div>
+            <div class="form-group">
+              <label>用户名</label>
+              <input type="text" id="username" placeholder="管理员用户名" autocomplete="username">
+            </div>
+            <div class="form-group">
+              <label>密码</label>
+              <input type="password" id="password" placeholder="密码" autocomplete="current-password">
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;margin-bottom:12px;">
+              <input type="checkbox" id="rememberPass"> <span data-i18n="记住密码（本设备自动登录）">记住密码（本设备自动登录）</span>
+            </label>
+            <button class="btn btn-primary" id="loginBtn" onclick="addServer()" style="width:100%;padding:11px 0;">🔗 添加并连接</button>
+            <div class="error-msg" id="loginError"></div>
+          </div>
+        </div>
+        <div class="saved-servers">
+          <h4>💾 已保存的服务器</h4>
+          <div id="serverListContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 主体 ==================== -->
+  <div id="app" class="app-shell">
+
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <div class="brand"><span class="logo">⚓</span><span>帆船控制台</span></div>
+      <span class="subtitle" id="headerInfo">未连接</span>
+      <div class="spacer"></div>
+      <span class="conn-dot off" id="connDot" title="连接状态"></span>
+      <span class="version-badge" id="versionDisplay">-</span>
+      <select id="langSelect" class="lang-select" onchange="setLang(this.value)" title="Language / 语言 / 語言">
+        <option value="zh-CN">简体中文</option>
+        <option value="zh-TW">繁體中文</option>
+        <option value="en">English</option>
+      </select>
+      <div class="theme-selector">
+        <button class="theme-btn" id="themeBtn" onclick="toggleThemePanel()" title="外观设置">🎨</button>
+        <div class="theme-panel" id="themePanel">
+          <div class="tp-section">
+            <div class="tp-title">强调色</div>
+            <div class="accent-grid" id="accentGrid"></div>
+          </div>
+          <div class="tp-section">
+            <div class="tp-title">明暗模式</div>
+            <div class="mode-row" id="modeRow">
+              <button class="mode-btn" data-mode="dark" onclick="setColorMode('dark')">🌙 深色</button>
+              <button class="mode-btn" data-mode="light" onclick="setColorMode('light')">☀️ 浅色</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <button id="refreshBtn" class="btn btn-ghost btn-sm" onclick="manualRefresh()">🔄 刷新</button>
+      <button class="btn btn-ghost btn-sm" onclick="goToServers()">🖥 切换服务器</button>
+      <span class="user-chip" id="userDisplay">👤 -</span>
+    </header>
+
+    <!-- 侧边栏 + 内容 -->
+    <div class="app-body">
+      <nav class="sidebar" id="sidebar">
+        <div class="side-label">总览</div>
+        <button class="tab" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="tab-ico">📊</span><span>数据大屏</span></button>
+
+        <div class="side-label">实时监控</div>
+        <button class="tab active" data-tab="games" onclick="switchTab('games')"><span class="tab-ico">🎮</span><span>游戏房间</span></button>
+        <button class="tab" data-tab="players" onclick="switchTab('players')"><span class="tab-ico">👤</span><span>在线玩家</span></button>
+        <button class="tab" data-tab="chat" onclick="switchTab('chat')"><span class="tab-ico">💬</span><span>聊天中心</span></button>
+
+        <div class="side-label">行为记录</div>
+        <button class="tab" data-tab="behaviors" onclick="switchTab('behaviors')"><span class="tab-ico">📜</span><span>行为日志</span></button>
+        <button class="tab" data-tab="reports" onclick="switchTab('reports')"><span class="tab-ico">📢</span><span>举报处理</span></button>
+        <button class="tab" data-tab="connect" onclick="switchTab('connect')"><span class="tab-ico">🔗</span><span>连接日志</span></button>
+        <button class="tab" data-tab="replays" onclick="switchTab('replays')"><span class="tab-ico">📼</span><span>对局复盘</span></button>
+
+        <div class="side-label">玩家档案</div>
+        <button class="tab" data-tab="stats" onclick="switchTab('stats')"><span class="tab-ico">🏆</span><span>战绩统计</span></button>
+        <button class="tab" data-tab="times" onclick="switchTab('times')"><span class="tab-ico">⏱</span><span>在线时长</span></button>
+        <button class="tab" data-tab="footprints" onclick="switchTab('footprints')"><span class="tab-ico">🧭</span><span>玩家足迹</span></button>
+        <button class="tab" data-tab="bans" onclick="switchTab('bans')"><span class="tab-ico">🚫</span><span>封禁名单</span></button>
+
+        <div class="side-label">运营中心</div>
+        <button class="tab" data-tab="schedule" onclick="switchTab('schedule')"><span class="tab-ico">⏰</span><span>定时任务</span></button>
+        <button class="tab" data-tab="welcome" onclick="switchTab('welcome')"><span class="tab-ico">👋</span><span>欢迎语</span></button>
+        <button class="tab" data-tab="broadcast" onclick="switchTab('broadcast')"><span class="tab-ico">📣</span><span>定时广播</span></button>
+        <button class="tab" data-tab="filter" onclick="switchTab('filter')"><span class="tab-ico">🧹</span><span>违禁词过滤</span></button>
+        <button class="tab" data-tab="titles" onclick="switchTab('titles')"><span class="tab-ico">🎖</span><span>称号系统</span></button>
+        <button class="tab" data-tab="codes" onclick="switchTab('codes')"><span class="tab-ico">🚪</span><span>房间码池</span></button>
+
+        <div class="side-label">AI 智能</div>
+        <button class="tab" data-tab="ai" onclick="switchTab('ai')"><span class="tab-ico">🤖</span><span>AI 助手</span></button>
+        <button class="tab" data-tab="aichats" onclick="switchTab('aichats')"><span class="tab-ico">🗂</span><span>AI 聊天记录</span></button>
+        <button class="tab" data-tab="aisettings" onclick="switchTab('aisettings')"><span class="tab-ico">⚙️</span><span>AI 设置</span></button>
+
+        <div class="side-label">系统</div>
+        <button class="tab" data-tab="settings" onclick="switchTab('settings')"><span class="tab-ico">👤</span><span>账号与用户</span></button>
+        <button class="tab" data-tab="server" onclick="switchTab('server')"><span class="tab-ico">🧩</span><span>服务器选项</span></button>
+        <button class="tab" data-tab="logs" onclick="switchTab('logs')"><span class="tab-ico">📋</span><span>操作日志</span></button>
+      </nav>
+
+      <main class="main">
+
+        <!-- 全局统计条 -->
+        <div class="stats-bar">
+          <div class="stat-card"><div class="number" id="statGames">-</div><div class="label">活跃游戏</div></div>
+          <div class="stat-card"><div class="number" id="statPlayers">-</div><div class="label">在线玩家</div></div>
+        </div>
+
+        <!-- ===== 数据大屏 ===== -->
+        <div id="tab-dashboard" class="tab-content">
+          <div class="page-head"><h2>数据大屏</h2><div class="page-desc">服务器运行总览 · 每 60 秒自动刷新</div></div>
+          <div class="stats-bar">
+            <div class="kpi-card"><div class="kpi-ico">🎮</div><div class="number" id="dashGames">-</div><div class="label">活跃房间</div></div>
+            <div class="kpi-card"><div class="kpi-ico">👥</div><div class="number" id="dashPlayers">-</div><div class="label">在线玩家</div></div>
+            <div class="kpi-card"><div class="kpi-ico">🛬</div><div class="number" id="dashJoins">-</div><div class="label">今日进服</div></div>
+            <div class="kpi-card"><div class="kpi-ico">💬</div><div class="number" id="dashChats">-</div><div class="label">今日消息</div></div>
+            <div class="kpi-card"><div class="kpi-ico">📢</div><div class="number" id="dashReports">-</div><div class="label">今日举报</div></div>
+            <div class="kpi-card"><div class="kpi-ico">🔪</div><div class="number" id="dashMurders">-</div><div class="label">今日击杀</div></div>
+          </div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            <div class="card" style="flex:2;min-width:320px;">
+              <div class="card-head"><h3>📈 在线玩家趋势</h3><span class="card-desc">近 30 分钟采样</span></div>
+              <div class="card-body"><div id="dashChart" style="display:flex;align-items:flex-end;gap:3px;height:130px;"></div></div>
+            </div>
+            <div class="card" style="flex:1;min-width:280px;">
+              <div class="card-head"><h3>🔥 热门房间 Top5</h3></div>
+              <div class="card-body"><div id="dashHotGames" style="font-size:13px;line-height:2.1;"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 游戏房间 ===== -->
+        <div id="tab-games" class="tab-content active">
+          <div class="page-head"><h2>游戏房间</h2><div class="page-desc">实时查看与批量管理所有活跃房间（5 秒自动刷新）</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>🎮 房间列表</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="gamesSelectAll" onchange="toggleSelectAll('games')"> 全选</label>
+              <span style="font-size:12px;color:var(--text-muted);" id="gamesSelCount">已选 0 个房间</span>
+              <button class="btn btn-warning btn-sm" onclick="batchKickGames()">踢出选中房间</button>
+              <button class="btn btn-primary btn-sm" onclick="openBatchMsg('games')">发消息</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;max-height:none;">
+                <table>
+                  <thead><tr><th style="width:32px;"></th><th>代码</th><th>名称</th><th>玩家数</th><th>状态</th><th>主机</th><th>公开</th></tr></thead>
+                  <tbody id="gamesBody"><tr><td colspan="7"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 在线玩家 ===== -->
+        <div id="tab-players" class="tab-content">
+          <div class="page-head"><h2>在线玩家</h2><div class="page-desc">实时会话、网络质量与身份标识 · 支持批量踢出/群发</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>👤 会话列表</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="playersSelectAll" onchange="toggleSelectAll('players')"> 全选</label>
+              <span style="font-size:12px;color:var(--text-muted);" id="playersSelCount">已选 0 名玩家</span>
+              <button class="btn btn-warning btn-sm" onclick="batchKickPlayers()">批量踢出</button>
+              <button class="btn btn-primary btn-sm" onclick="openBatchMsg('players')">发消息</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;max-height:none;">
+                <table>
+                  <thead><tr><th style="width:32px;"></th><th>ID</th><th>玩家名称</th><th>IP</th><th>FID <span class="fid-help" onclick="openModal('fidInfoModal')" title="点击了解 FID">?</span></th><th>好友码</th><th>PUID</th><th>游戏</th><th>端口</th><th>延迟</th><th>平台/版本</th><th>MOD</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody id="playersBody"><tr><td colspan="14"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 聊天中心 ===== -->
+        <div id="tab-chat" class="tab-content">
+          <div class="page-head"><h2>聊天中心</h2><div class="page-desc">向房间/玩家发送消息（支持 Among Us 富文本），并查看实时聊天记录</div></div>
+          <div class="card">
+            <div class="card-head"><h3>💬 发送消息</h3></div>
+            <div class="card-body">
+              <div class="chat-bar">
+                <select id="chatGameSelect"><option value="">选择房间...</option></select>
+                <button class="btn btn-primary btn-sm" onclick="sendPublicChat()">公开发送</button>
+                <button class="btn btn-warning btn-sm" onclick="openPrivateChat()">私密发送</button>
+              </div>
+              <div class="rich-bar" data-for="chatMessage">
+                <span class="rich-label">🎨 富文本</span>
+                <button class="btn btn-xs rich-btn" onclick="openColorPicker('chatMessage')" title="插入颜色 <color=#xxxxxx>文本</color>">🅰 颜色</button>
+                <select class="rich-size" onchange="if(this.value){insertSizeTag('chatMessage', this.value); this.selectedIndex=0;}" title="插入字号 <size=N%>文本</size>">
+                  <option value="">大小</option>
+                  <option value="60%">60% 小</option><option value="80%">80%</option><option value="100%">100% 标准</option><option value="150%">150% 大</option><option value="200%">200% 特大</option>
+                </select>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('chatMessage','b')" title="加粗"><b>B</b></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('chatMessage','i')" title="斜体"><i>I</i></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('chatMessage','u')" title="下划线"><u>U</u></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('chatMessage','s')" title="删除线"><s>S</s></button>
+                <button class="btn btn-xs rich-btn" onclick="insertTag('chatMessage','br')" title="强制换行">⏎ 换行</button>
+                <button class="btn btn-xs rich-btn" onclick="openRichHelp('chatMessage')" title="查看全部 Among Us 富文本标签">ℹ️ 更多</button>
+              </div>
+              <textarea id="chatMessage" class="rich-input" placeholder="输入消息...（Enter 发送，Shift+Enter 换行）"></textarea>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h3>📁 聊天记录</h3><span class="card-desc">实时写入，可开启自动刷新</span>
+              <div class="spacer" style="flex:1;"></div>
+              <select id="chatLogSelect" style="flex:1;min-width:180px;max-width:320px;"><option value="">选择日志文件...</option></select>
+              <button class="btn btn-info btn-sm" onclick="refreshChatLogList()">刷新</button>
+              <button class="btn btn-primary btn-sm" onclick="loadChatLog()">查看</button>
+              <button class="btn btn-warning btn-sm" id="chatAutoRefreshBtn" onclick="toggleChatAutoRefresh()">⏱ 自动刷新:关</button>
+            </div>
+            <div class="card-body">
+              <div class="chat-box" id="chatLogBox"><div class="empty-state"><p>选择聊天记录查看，开启自动刷新后每 3 秒实时更新</p></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 行为日志 ===== -->
+        <div id="tab-behaviors" class="tab-content">
+          <div class="page-head"><h2>行为日志</h2><div class="page-desc">击杀 / 任务 / 通风 / 会议 / 举报 / 封禁等全量行为事件（最近 500 条）</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>📜 全量行为事件</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <select id="behaviorTypeSelect" style="flex:0 0 auto;min-width:140px;"><option value="all">全部类型</option></select>
+              <input type="text" id="behaviorSearch" placeholder="搜索玩家/好友码/房间..." style="flex:1;min-width:160px;max-width:280px;">
+              <button class="btn btn-info btn-sm" onclick="loadBehaviorLogs()">查询</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>时间</th><th>类型</th><th>玩家</th><th>好友码</th><th>房间</th><th>详情</th></tr></thead>
+                  <tbody id="behaviorsBody"><tr><td colspan="6"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 举报处理 ===== -->
+        <div id="tab-reports" class="tab-content">
+          <div class="page-head"><h2>举报处理</h2><div class="page-desc">玩家在游戏内使用 /report 提交的举报，在此处置</div></div>
+          <div class="card">
+            <div class="card-head"><h3>📢 玩家举报</h3></div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>ID</th><th>时间</th><th>举报者</th><th>好友码</th><th>PUID</th><th>IP</th><th>房间</th><th>描述</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody id="reportsBody"><tr><td colspan="10"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 连接日志 ===== -->
+        <div id="tab-connect" class="tab-content">
+          <div class="page-head"><h2>连接日志</h2><div class="page-desc">玩家进服 / 断线 / 错误事件（按日期文件归档）</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>🔗 连接事件</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <select id="connLogSelect" style="flex:1;min-width:180px;max-width:320px;"><option value="">选择日志文件...</option></select>
+              <button class="btn btn-info btn-sm" onclick="refreshConnLogList()">刷新</button>
+              <button class="btn btn-primary btn-sm" onclick="loadConnLog()">查看</button>
+              <span style="color:var(--text-muted);font-size:12px;">筛选:</span>
+              <button class="btn btn-xs" onclick="loadConnLog('')">全部</button>
+              <button class="btn btn-xs btn-info" onclick="loadConnLog('connect')">连接</button>
+              <button class="btn btn-xs btn-danger" onclick="loadConnLog('disconnect')">断线</button>
+              <button class="btn btn-xs btn-warning" onclick="loadConnLog('error')">错误</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>时间</th><th>类型</th><th>玩家</th><th>IP</th><th>游戏</th><th>详情</th></tr></thead>
+                  <tbody id="connLogBody"><tr><td colspan="6"><div class="empty-state"><p>选择连接日志查看</p></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 对局复盘 ===== -->
+        <div id="tab-replays" class="tab-content">
+          <div class="page-head"><h2>对局复盘</h2><div class="page-desc">每局结束自动生成：角色分配、击杀链、投票与会议时间线</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>📼 复盘列表</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <button class="btn btn-danger btn-xs" onclick="deleteAllReplays()">清空复盘</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>房间码</th><th>地图</th><th>开始时间</th><th>时长</th><th>结果</th><th>操作</th></tr></thead>
+                  <tbody id="replaysBody"><tr><td colspan="6"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+              <div id="replayDetail" style="margin:16px;display:none;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 战绩统计 ===== -->
+        <div id="tab-stats" class="tab-content">
+          <div class="page-head"><h2>战绩统计</h2><div class="page-desc">每位玩家的历史对局数据聚合（上限 5000 条）</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>🏆 玩家战绩</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <input type="text" id="statsSearch" placeholder="搜索好友码/玩家名..." style="flex:1;min-width:160px;max-width:280px;">
+              <button class="btn btn-info btn-sm" onclick="renderStats()">查询</button>
+              <button class="btn btn-danger btn-xs" onclick="resetPlayerStats()">重置全部</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>好友码</th><th>玩家名</th><th>场次</th><th>胜</th><th>负</th><th>内鬼胜</th><th>击杀</th><th>死亡</th><th>任务</th><th>被投出</th><th>首次</th><th>最近</th></tr></thead>
+                  <tbody id="statsBody"><tr><td colspan="12"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 在线时长 ===== -->
+        <div id="tab-times" class="tab-content">
+          <div class="page-head"><h2>在线时长</h2><div class="page-desc">玩家的首次加入、最近登录与累计游玩时长</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>⏱ 时长统计</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <button class="btn btn-danger btn-xs" onclick="clearPlayerTimes()">清空全部记录</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>好友码/标识</th><th>玩家名</th><th>首次加入</th><th>上次登录</th><th>累计时长</th></tr></thead>
+                  <tbody id="playerTimesBody"><tr><td colspan="5"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 玩家足迹 ===== -->
+        <div id="tab-footprints" class="tab-content">
+          <div class="page-head"><h2>玩家足迹</h2><div class="page-desc">进服历史、会话时长与常用 IP 档案</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>🧭 足迹档案</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <input type="text" id="footprintSearch" placeholder="搜索好友码/玩家名/PUID/IP..." style="flex:1;min-width:160px;max-width:280px;">
+              <button class="btn btn-info btn-sm" onclick="loadFootprints()">查询</button>
+              <button class="btn btn-danger btn-xs" onclick="clearFootprints()">清空足迹</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>玩家</th><th>好友码</th><th>PUID</th><th>累计在线</th><th>最近上线</th><th>会话数</th><th>常用 IP</th><th>操作</th></tr></thead>
+                  <tbody id="footprintsBody"><tr><td colspan="8"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+              <div id="footprintDetail" style="margin:16px;display:none;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 封禁名单 ===== -->
+        <div id="tab-bans" class="tab-content">
+          <div class="page-head"><h2>封禁名单</h2><div class="page-desc">按名称 / PUID / 好友码 / FID / IP 生效的封禁规则</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>🚫 封禁列表</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <button class="btn btn-primary btn-sm" onclick="showAddBanModal()">+ 添加封禁</button>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>ID</th><th>名称</th><th>PUID</th><th>好友代码</th><th>FID</th><th>IP</th><th>原因</th><th>时间</th><th>封禁者</th><th>操作</th></tr></thead>
+                  <tbody id="bansBody"><tr><td colspan="10"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 定时任务 ===== -->
+        <div id="tab-schedule" class="tab-content">
+          <div class="page-head"><h2>定时任务</h2><div class="page-desc">按间隔或每日固定时间自动执行面板操作（发消息 / 清理数据）</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>⏰ 任务列表</h3><span class="card-desc">调度器每 30 秒检查一次到期任务</span>
+              <div class="spacer" style="flex:1;"></div>
+              <button class="btn btn-primary btn-sm" onclick="openScheduleModal()">+ 新建任务</button>
+            </div>
+            <div class="card-body">
+              <div id="scheduleBody"><div class="empty-state"><h3>加载中...</h3></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 欢迎语 ===== -->
+        <div id="tab-welcome" class="tab-content">
+          <div class="page-head"><h2>欢迎语</h2><div class="page-desc">玩家加入房间时自动私信，多条模板轮流发送</div></div>
+          <div class="card">
+            <div class="card-head"><h3>👋 欢迎语模板</h3></div>
+            <div class="card-body">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.8;">
+                占位符：<code>{PLAYER_NAME}</code> 玩家名（旧别名 <code>{Name}</code> 兼容）、<code>{Room}</code> 房间码、<code>{LAST_LOGIN_TIME}</code> 上次登录、<code>{TIME_SINCE_LAST_LOGIN}</code> 距上次登录、<code>{PLAY_TIME}</code> 累计游玩。
+                支持 Among Us 富文本：<code>&lt;color=#FFD700&gt;欢迎&lt;/color&gt;</code>、<code>&lt;size=150%&gt;大字&lt;/size&gt;</code> 等。
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>启用</label><select id="welcomeEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveWelcomeSettings()">保存</button></div>
+              </div>
+              <div class="rich-bar" data-for="newWelcomeMsg">
+                <span class="rich-label">🎨 富文本</span>
+                <button class="btn btn-xs rich-btn" onclick="openColorPicker('newWelcomeMsg')">🅰 颜色</button>
+                <select class="rich-size" onchange="if(this.value){insertSizeTag('newWelcomeMsg', this.value); this.selectedIndex=0;}">
+                  <option value="">大小</option>
+                  <option value="60%">60% 小</option><option value="80%">80%</option><option value="100%">100% 标准</option><option value="150%">150% 大</option><option value="200%">200% 特大</option>
+                </select>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('newWelcomeMsg','b')"><b>B</b></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('newWelcomeMsg','i')"><i>I</i></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('newWelcomeMsg','u')"><u>U</u></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('newWelcomeMsg','s')"><s>S</s></button>
+                <button class="btn btn-xs rich-btn" onclick="insertTag('newWelcomeMsg','br')">⏎</button>
+                <button class="btn btn-xs rich-btn" onclick="openRichHelp('newWelcomeMsg')">ℹ️</button>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin:12px 0;">
+                <textarea id="newWelcomeMsg" class="rich-input" rows="3" placeholder="欢迎 {PLAYER_NAME} 加入 {Room} 房间！" style="flex:1;min-width:240px;"></textarea>
+                <button class="btn btn-primary btn-sm" onclick="addWelcomeMsg()">+ 添加</button>
+              </div>
+              <div id="welcomeMsgsBox" style="display:flex;flex-direction:column;gap:6px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 定时广播 ===== -->
+        <div id="tab-broadcast" class="tab-content">
+          <div class="page-head"><h2>定时广播</h2><div class="page-desc">按设定间隔向所有房间轮流发送公告（显示为"公告"消息）</div></div>
+          <div class="card">
+            <div class="card-head"><h3>📣 广播设置</h3></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>启用</label><select id="bcEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>间隔（分钟）</label><input type="number" id="bcInterval" min="1" max="1440" value="30"></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveBroadcastSettings()">保存</button></div>
+              </div>
+              <div class="rich-bar" data-for="newBcMsg">
+                <span class="rich-label">🎨 富文本</span>
+                <button class="btn btn-xs rich-btn" onclick="openColorPicker('newBcMsg')">🅰 颜色</button>
+                <select class="rich-size" onchange="if(this.value){insertSizeTag('newBcMsg', this.value); this.selectedIndex=0;}">
+                  <option value="">大小</option>
+                  <option value="60%">60% 小</option><option value="80%">80%</option><option value="100%">100% 标准</option><option value="150%">150% 大</option><option value="200%">200% 特大</option>
+                </select>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('newBcMsg','b')"><b>B</b></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('newBcMsg','i')"><i>I</i></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('newBcMsg','u')"><u>U</u></button>
+                <button class="btn btn-xs rich-btn" onclick="wrapTag('newBcMsg','s')"><s>S</s></button>
+                <button class="btn btn-xs rich-btn" onclick="insertTag('newBcMsg','br')">⏎</button>
+                <button class="btn btn-xs rich-btn" onclick="openRichHelp('newBcMsg')">ℹ️</button>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin:12px 0;">
+                <textarea id="newBcMsg" class="rich-input" placeholder="输入广播内容...（支持 Among Us 富文本）" style="flex:1;min-width:240px;"></textarea>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <button class="btn btn-primary btn-sm" onclick="addBroadcastMsg()">+ 添加</button>
+                  <button class="btn btn-warning btn-sm" onclick="broadcastNow()">📣 立即广播</button>
+                </div>
+              </div>
+              <div id="bcMsgsBox" style="display:flex;flex-direction:column;gap:6px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 违禁词过滤 ===== -->
+        <div id="tab-filter" class="tab-content">
+          <div class="page-head"><h2>违禁词过滤</h2><div class="page-desc">聊天内容过滤、屏蔽提示与累计自动禁言</div></div>
+          <div class="card">
+            <div class="card-head"><h3>🧹 过滤设置</h3></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>启用</label><select id="filterEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group" style="flex:2;"><label>屏蔽提示语</label><input type="text" id="filterTip" placeholder="你的消息包含违禁词，已被系统屏蔽。"></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveFilterSettings()">保存</button></div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0;">
+                <input type="text" id="newFilterWord" placeholder="输入违禁词..." style="flex:1;min-width:160px;">
+                <button class="btn btn-primary btn-sm" onclick="addFilterWord()">+ 添加</button>
+              </div>
+              <div id="filterWordsBox" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+              <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px;">⏱ 累计自动禁言</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">同一玩家触发违禁词达到次数后自动禁言，期间所有消息被屏蔽。</div>
+                <div class="form-row">
+                  <div class="form-group"><label>启用自动禁言</label><select id="filterAutoMute"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                  <div class="form-group"><label>触发次数</label><input type="number" id="filterViolationLimit" min="1" max="50" value="3"></div>
+                  <div class="form-group"><label>禁言时长（分钟）</label><input type="number" id="filterMuteMinutes" min="1" max="1440" value="10"></div>
+                  <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveFilterSettings(true)">保存禁言设置</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>📊 触发统计</h3><span class="card-desc">玩家好友代码 + 违禁词 + 次数</span><div class="spacer" style="flex:1;"></div><button class="btn btn-ghost btn-sm" onclick="clearFilterStats()">🗑 清空统计</button></div>
+            <div class="card-body" style="padding:0;">
+              <div style="max-height:360px;overflow:auto;">
+                <table class="data-table"><thead><tr><th>好友代码</th><th>玩家名</th><th>违禁词</th><th>次数</th><th>最后触发</th><th></th></tr></thead><tbody id="filterStatsBody"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 称号系统 ===== -->
+        <div id="tab-titles" class="tab-content">
+          <div class="page-head"><h2>称号系统</h2><div class="page-desc">为玩家名字附加富文本称号（游戏内可用 /title help 查询）</div></div>
+          <div class="card">
+            <div class="card-head"><h3>🎖 称号管理</h3></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>启用称号</label><select id="titleEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>称号带 []</label><select id="titleBrackets"><option value="true">带</option><option value="false">不带</option></select></div>
+                <div class="form-group"><label>默认位置</label><select id="titlePosition"><option value="left">名字前</option><option value="right">名字后</option></select></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveTitleSettings()">保存</button></div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin:12px 0;padding-top:12px;border-top:1px solid var(--border);">
+                <input type="text" id="newTitleName" placeholder="称号名称，如 VIP" style="flex:1;min-width:120px;">
+                <input type="text" id="newTitleHtml" placeholder="HTML 格式，如 <color=#FFD700>VIP</color>" style="flex:2;min-width:220px;font-family:var(--mono);">
+                <button class="btn btn-primary btn-sm" onclick="addTitle()">+ 添加称号</button>
+              </div>
+              <div id="titlesBox" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;"></div>
+              <div style="padding-top:12px;border-top:1px solid var(--border);">
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🎯 分配称号给玩家</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px;">
+                  <input type="text" id="titlePlayerFc" placeholder="玩家好友码，如 Name#1234" style="flex:1;min-width:150px;">
+                  <select id="titlePlayerSelect" style="flex:1;min-width:130px;"><option value="">选择称号...</option></select>
+                  <button class="btn btn-primary btn-sm" onclick="setPlayerTitle()">设置</button>
+                  <button class="btn btn-danger btn-sm" onclick="removePlayerTitle()">清除</button>
+                </div>
+                <div class="table-wrap"><table>
+                  <thead><tr><th>好友码</th><th>称号</th><th>操作</th></tr></thead>
+                  <tbody id="titlePlayersBody"><tr><td colspan="3"><div class="empty-state"><h3>暂无分配</h3></div></td></tr></tbody>
+                </table></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 房间码池 ===== -->
+        <div id="tab-codes" class="tab-content">
+          <div class="page-head"><h2>房间码池</h2><div class="page-desc">玩家建房时从此池随机分配自定义房间码，房间销毁后自动回收</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>🚪 自定义房间码</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="codesEnabled" onchange="updateCodesSettings()"> 启用</label>
+            </div>
+            <div class="card-body">
+              <div class="chat-bar">
+                <input type="text" id="newCodeInput" placeholder="4或6位字母 A-Z，如 AB12CD" style="flex:1;min-width:180px;text-transform:uppercase;">
+                <button class="btn btn-primary btn-sm" onclick="addGameCode()">+ 添加</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>房间码</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody id="codesBody"><tr><td colspan="3"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== AI 助手 ===== -->
+        <div id="tab-ai" class="tab-content">
+          <div class="page-head"><h2>AI 助手</h2><div class="page-desc">对话问答 · 数据分析 · Agent 自动操作面板</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>🤖 对话</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <label id="aiAgentWrap" style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;">
+                <input type="checkbox" id="aiAgentEnabled" onchange="toggleAgentMode()"> 🤖 Agent 模式
+                <span style="color:var(--text-muted);font-size:12px;" id="aiAgentModeHint">（AI 自动操作面板执行你的要求）</span>
+              </label>
+              <span id="aiAgentStatus" style="font-size:12px;color:var(--text-muted);"></span>
+            </div>
+            <div class="card-body">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.7;">
+                可直接与 AI 对话，或选择"分析数据源"让 AI 带上服务器数据一起分析。开启 Agent 模式后，AI 将自动调用面板工具完成你的要求（每个变更操作都会请求你确认）。
+              </div>
+              <div class="agent-intro" id="agentIntro">
+                <div class="agent-intro-head" onclick="document.getElementById('agentIntro').classList.toggle('open')">
+                  <span>❓ Agent 模式能做什么？（点击展开/收起）</span>
+                  <span class="agent-intro-arrow">▾</span>
+                </div>
+                <div class="agent-intro-body">
+                  <div class="agent-intro-col">
+                    <div class="agent-intro-title">✅ 可以自动执行</div>
+                    <div style="font-size:12.5px;line-height:1.9;color:var(--text-secondary);">
+                      <strong>查询</strong>：在线玩家、房间、封禁、举报、行为日志、战绩、足迹、复盘、AI 聊天记录、操作日志、数据大屏、各类设置、定时任务<br>
+                      <strong>操作</strong>：踢出/封禁、发送消息、处理举报、违禁词、欢迎语、广播、房间码、功能开关、端口池、称号、QQ 广播、清空数据、用户管理、定时任务管理
+                    </div>
+                  </div>
+                  <div class="agent-intro-col">
+                    <div class="agent-intro-title">❌ 无法执行</div>
+                    <div style="font-size:12.5px;line-height:1.9;color:var(--text-secondary);">
+                      查看对局内实时状态（角色/任务/投票）<br>
+                      修改服务器配置文件、重启/停止服务端<br>
+                      执行游戏内玩家操作（移动、投票、报告）<br>
+                      读取玩家账号密码等敏感信息<br>
+                      执行面板工具列表之外的操作
+                    </div>
+                  </div>
+                  <div class="agent-intro-col" style="flex-basis:100%;">
+                    <div class="agent-intro-title">💡 使用建议</div>
+                    <div style="font-size:12.5px;line-height:1.9;color:var(--text-secondary);">
+                      直接描述目标即可，例如："把玩家 小明 踢出房间"、"每天早上 9 点清理一次足迹"、"处理所有待处理的举报"。AI 会先查询再操作；缺少参数时会先查询获取；每个变更操作都需要你点击确认；每个任务最多执行 6 轮操作。
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+                <select id="aiContextSelect" style="flex:0 0 auto;min-width:150px;">
+                  <option value="">无（直接对话）</option>
+                  <option value="logs">📜 行为日志</option>
+                  <option value="stats">🏆 玩家战绩</option>
+                  <option value="footprints">🦶 玩家足迹</option>
+                  <option value="replays">📼 对局复盘</option>
+                  <option value="chats">💬 聊天记录</option>
+                  <option value="reports">📢 举报</option>
+                </select>
+                <button class="btn btn-ghost btn-sm" onclick="clearAiContext()">🧹 清空上下文</button>
+              </div>
+              <div class="ai-chat-box" id="aiChatBox">
+                <div class="empty-state"><p>向 AI 提问吧！例如：<em>"分析最近的行为日志，找出可疑玩家"</em></p></div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-start;">
+                <textarea id="aiChatInput" rows="2" placeholder="输入问题，Enter 发送，Shift+Enter 换行..." style="flex:1;resize:vertical;"></textarea>
+                <button class="btn btn-primary" id="aiSendBtn" onclick="sendAiChat()" style="margin-top:2px;">发送</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== AI 聊天记录 ===== -->
+        <div id="tab-aichats" class="tab-content">
+          <div class="page-head"><h2>AI 聊天记录</h2><div class="page-desc">面板 AI / Agent 任务 / 游戏内 /aichat 三类对话，支持分类与筛选（最多显示 100 条）</div></div>
+          <div class="card">
+            <div class="card-head">
+              <h3>🗂 对话记录</h3>
+              <div class="spacer" style="flex:1;"></div>
+              <select id="aiChatSource" onchange="loadAiChats()" style="min-width:110px;">
+                <option value="">全部来源</option>
+                <option value="panel">🖥 面板</option>
+                <option value="ingame">🎮 游戏内</option>
+              </select>
+              <select id="aiChatKind" onchange="loadAiChats()" style="min-width:120px;">
+                <option value="">全部类型</option>
+                <option value="chat">💬 普通对话</option>
+                <option value="agent">🤖 Agent 任务</option>
+                <option value="schedule">⏰ 定时任务</option>
+              </select>
+              <select id="aiChatUser" onchange="loadAiChats()" style="min-width:120px;">
+                <option value="">全部用户</option>
+              </select>
+              <input type="date" id="aiChatDate" onchange="loadAiChats()" style="min-width:140px;">
+              <input type="text" id="aiChatSearch" placeholder="搜索玩家/用户/内容..." style="flex:1;min-width:150px;max-width:260px;" onkeydown="if(event.key==='Enter')loadAiChats()">
+              <button class="btn btn-info btn-sm" onclick="loadAiChats()">查询</button>
+              <button class="btn btn-sm" onclick="resetAiChatFilters()">重置</button>
+            </div>
+            <div class="card-body" style="padding:8px 14px 0 14px;">
+              <div id="aiChatStats" style="display:flex;gap:8px;flex-wrap:wrap;padding-bottom:10px;font-size:12px;color:var(--text-muted);"></div>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;max-height:62vh;">
+                <table>
+                  <thead><tr><th>时间</th><th>来源</th><th>类型</th><th>面板用户</th><th>玩家</th><th>好友码</th><th>房间</th><th>内容</th></tr></thead>
+                  <tbody id="aiChatsBody"><tr><td colspan="8"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== AI 设置 ===== -->
+        <div id="tab-aisettings" class="tab-content">
+          <div class="page-head"><h2>AI 设置</h2><div class="page-desc">游戏内 AI 与面板 AI 的模型端点配置</div></div>
+          <div class="card">
+            <div class="card-head"><h3>🧠 基础设置</h3></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>游戏内 AI 聊天</label><select id="aiInGameEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>默认模型（未单独设置时使用）</label><input type="text" id="aiModel" placeholder="glm-4.7-flash"></div>
+                <div class="form-group"><label>上下文条数</label><input type="number" id="aiMaxContext" min="1" max="100" value="20"></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveAiSettings()">保存</button></div>
+              </div>
+              <div class="form-group" style="margin-top:10px;"><label>System Prompt</label><textarea id="aiSystemPrompt" rows="3" placeholder="AI 的系统提示词..."></textarea></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>⏱ AI 使用频率限制</h3><span class="card-desc">滑动窗口：窗口秒数内最多 N 轮对话，超出即提示"发送太快了，请稍后再试"（不告知剩余等待时间）</span></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>游戏内 /aichat 窗口（秒）</label><input type="number" id="aiLimInGameSec" min="10" max="86400" value="60"></div>
+                <div class="form-group"><label>游戏内轮数</label><input type="number" id="aiLimInGameRounds" min="1" max="100" value="5"></div>
+                <div class="form-group"><label>面板非管理员窗口（秒）</label><input type="number" id="aiLimPanelSec" min="10" max="86400" value="100"></div>
+                <div class="form-group"><label>面板非管理员轮数</label><input type="number" id="aiLimPanelRounds" min="1" max="100" value="2"></div>
+                <div class="form-group"><label>联网搜索</label><select id="aiWebSearch"><option value="true">开启</option><option value="false">关闭</option></select><div style="font-size:11px;color:var(--text-muted);">统一 cn.bing.com 搜索注入（所有端点）</div></div>
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);line-height:1.7;">示例：面板 100 秒 2 轮 = 非 Admin 用户 100 秒内发第 3 条会被拒绝。管理员不受面板轮数限制；设置保存在 webadmin_ai.json。</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>🖥 面板 AI 端点（自定义 API）</h3><span class="card-desc">开源版不内置 Key，需自行配置</span></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>API Key</label><input type="text" id="aiPanelKey" placeholder="必填：你的 API Key" style="font-family:var(--mono);"></div>
+                <div class="form-group"><label>接口地址（Base URL）</label><input type="text" id="aiPanelBaseUrl" placeholder="如 https://api.openai.com/v1" style="font-family:var(--mono);"></div>
+                <div class="form-group"><label>格式</label><select id="aiPanelFormat"><option value="zhipu">智谱 BigModel（默认格式）</option><option value="openai">OpenAI 兼容（DeepSeek/OpenAI 等）</option><option value="claude">Claude（Anthropic）</option></select></div>
+                <div class="form-group"><label>模型名称</label><input type="text" id="aiPanelModel" placeholder="留空=默认模型" style="font-family:var(--mono);"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>🎮 游戏内 AI 端点（自定义 API）</h3><span class="card-desc">玩家 /aichat 使用；自定义端点不支持联网搜索</span></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>API Key</label><input type="text" id="aiGameKey" placeholder="必填：你的 API Key" style="font-family:var(--mono);"></div>
+                <div class="form-group"><label>接口地址（Base URL）</label><input type="text" id="aiGameBaseUrl" placeholder="如 https://api.openai.com/v1" style="font-family:var(--mono);"></div>
+                <div class="form-group"><label>格式</label><select id="aiGameFormat"><option value="zhipu">智谱 BigModel（默认格式）</option><option value="openai">OpenAI 兼容（DeepSeek/OpenAI 等）</option><option value="claude">Claude（Anthropic）</option></select></div>
+                <div class="form-group"><label>模型名称</label><input type="text" id="aiGameModel" placeholder="留空=默认模型" style="font-family:var(--mono);"></div>
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:12px;">API Key/地址/模型 保存在服务器 webadmin_ai.json。开源版不内置任何 Key：请在此填写你自己的 API Key，或在服务器 config.json（WebAdmin:AiApiKey）设置；未配置时 AI 功能不可用。模型访问量大时自动降级：glm-4.7-flash → glm-4.5-flash → glm-4-flash（默认端点）。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 账号与用户 ===== -->
+        <div id="tab-settings" class="tab-content">
+          <div class="page-head"><h2>账号与用户</h2><div class="page-desc">当前登录信息、面板用户管理与密码修改</div></div>
+          <div class="card">
+            <div class="card-head"><h3>👤 账号信息</h3></div>
+            <div class="card-body">
+              <div class="section-row"><span style="color:var(--text-secondary);">当前用户</span><span class="value" id="setUsername">-</span></div>
+              <div class="section-row"><span style="color:var(--text-secondary);">角色</span><span class="value" id="setRole">-</span></div>
+              <div class="section-row"><span style="color:var(--text-secondary);">版本</span><span class="value" id="setVersion">-</span></div>
+            </div>
+          </div>
+          <div class="card" id="userManagementSection" style="display:none;">
+            <div class="card-head"><h3>👥 用户管理</h3></div>
+            <div class="card-body">
+              <div class="table-wrap" style="margin-bottom:12px;"><table><thead><tr><th>用户名</th><th>角色</th><th>操作</th></tr></thead>
+                <tbody id="usersBody"></tbody>
+              </table></div>
+              <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+                <div class="form-row">
+                  <div class="form-group"><label>新用户名</label><input type="text" id="newUserUsername" placeholder="用户名"></div>
+                  <div class="form-group"><label>密码（至少 8 位）</label><input type="password" id="newUserPassword" placeholder="密码"></div>
+                  <div class="form-group"><label>角色</label><select id="newUserRole"><option value="user">用户</option><option value="admin">管理员</option></select></div>
+                  <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="addUser()">添加</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>🔑 修改密码</h3></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>当前密码</label><input type="password" id="oldPwd" placeholder="当前密码" autocomplete="current-password"></div>
+                <div class="form-group"><label>新密码（至少 8 位）</label><input type="password" id="newPwd" placeholder="新密码" autocomplete="new-password"></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="changePassword()">修改密码</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 服务器选项 ===== -->
+        <div id="tab-server" class="tab-content">
+          <div class="page-head"><h2>服务器选项</h2><div class="page-desc">网络、存储与外部集成设置</div></div>
+          <div class="card">
+            <div class="card-head"><h3>🌐 多端口分配（Delta 端口池）</h3></div>
+            <div class="card-body">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.7;">开启后，每位玩家在获取 token 时会被分配一个专属 UDP 端口，解决 CDN/同一出口 IP 下多名玩家身份混淆问题。首次开启请先设置端口范围，保存后立即生效，已在线玩家不受影响。</div>
+              <div class="form-row">
+                <div class="form-group"><label>启用</label><select id="deltaEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>起始端口</label><input type="number" id="deltaStart" min="1" max="65535" placeholder="如 9999"></div>
+                <div class="form-group"><label>结束端口</label><input type="number" id="deltaEnd" min="1" max="65535" placeholder="如 20000"></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveDeltaPorts()">保存</button></div>
+              </div>
+              <div id="deltaStatus" style="font-size:12px;color:var(--text-muted);"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>🧩 存储类功能开关</h3></div>
+            <div class="card-body">
+              <div class="form-row">
+                <div class="form-group"><label>对局复盘</label><select id="featureReplays"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>保留复盘数</label><input type="number" id="featureMaxReplays" min="1" max="1000" value="100"></div>
+                <div class="form-group"><label>玩家足迹</label><select id="featureFootprints"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>空房自动清理</label><select id="featureCleanup"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>空房保留（分钟）</label><input type="number" id="featureCleanupTtl" min="1" max="1440" value="10"></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveFeatureSettings()">保存</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>📡 QQ 群房间广播（OneBot）</h3></div>
+            <div class="card-body">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.7;">连接 NapCat/OneBot v11 的 HTTP + WebSocket 端点。启用后在允许的 QQ 群发送 <code>#在线状态</code> 可查看服务器房间列表；房主可用 <code>/m on|off</code> 控制广播。保存后自动重连。</div>
+              <div class="form-row">
+                <div class="form-group"><label>启用</label><select id="monitorEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>OneBot 地址</label><input type="text" id="monitorUrl" placeholder="如 http://127.0.0.1:3001" style="font-family:var(--mono);"></div>
+                <div class="form-group"><label>Token（可选）</label><input type="text" id="monitorToken" placeholder="access_token" style="font-family:var(--mono);"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>允许的 QQ 群号（逗号分隔）</label><input type="text" id="monitorGroups" placeholder="如 123456,789012"></div>
+                <div class="form-group"><label>服务器名称</label><input type="text" id="monitorServerName" placeholder="帆船 AmongUs 服务器"></div>
+                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveMonitorSettings()">保存</button></div>
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:10px;">群内命令：<code>#在线状态</code> 房间报告 · <code>#订阅 房间号</code> 游戏结束私信提醒 · <code>#退订 房间号</code> · <code>#帮助</code>。房主游戏内 <code>/m</code> 推送房间报告，<code>/m 备注</code> 报告中本房间附一次性备注。</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>📊 QQ 群广播统计</h3><span class="card-desc">QQ 侧记录发送者QQ号+群号；游戏内 /m 记录好友代码+玩家名</span><div class="spacer" style="flex:1;"></div><button class="btn btn-ghost btn-sm" onclick="clearBStats()">🗑 清空统计</button></div>
+            <div class="card-body" style="padding:0;">
+              <div style="max-height:360px;overflow:auto;">
+                <table class="data-table"><thead><tr><th>时间</th><th>来源</th><th>发送者 / 订阅者</th><th>群号</th><th>内容</th><th></th></tr></thead><tbody id="bStatsBody"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 操作日志 ===== -->
+        <div id="tab-logs" class="tab-content">
+          <div class="page-head"><h2>操作日志</h2><div class="page-desc">面板登录与敏感操作的审计记录</div></div>
+          <div class="card">
+            <div class="card-head"><h3>📋 审计日志</h3></div>
+            <div class="card-body" style="padding:0;">
+              <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
+                <table>
+                  <thead><tr><th>时间</th><th>类型</th><th>详情</th><th>IP</th></tr></thead>
+                  <tbody id="logsBody"><tr><td colspan="4"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ==================== 弹窗 ==================== -->
+
+  <!-- 批量发送消息 -->
+  <div class="modal-overlay" id="batchMsgModal">
+    <div class="modal">
+      <h2>💬 批量发送消息</h2>
+      <div class="form-group"><label>目标</label><div id="batchMsgTarget" style="font-size:13px;color:var(--text-secondary);"></div></div>
+      <div class="form-group">
+        <label>消息</label>
+        <div class="rich-bar" data-for="batchMsgText">
+          <button class="btn btn-xs rich-btn" onclick="openColorPicker('batchMsgText')" title="颜色">🅰 颜色</button>
+          <select class="rich-size" onchange="if(this.value){insertSizeTag('batchMsgText', this.value); this.selectedIndex=0;}" title="字号">
+            <option value="">大小</option>
+            <option value="60%">60%</option><option value="80%">80%</option><option value="100%">100%</option><option value="150%">150%</option><option value="200%">200%</option>
+          </select>
+          <button class="btn btn-xs rich-btn" onclick="wrapTag('batchMsgText','b')"><b>B</b></button>
+          <button class="btn btn-xs rich-btn" onclick="wrapTag('batchMsgText','i')"><i>I</i></button>
+          <button class="btn btn-xs rich-btn" onclick="wrapTag('batchMsgText','u')"><u>U</u></button>
+          <button class="btn btn-xs rich-btn" onclick="wrapTag('batchMsgText','s')"><s>S</s></button>
+          <button class="btn btn-xs rich-btn" onclick="insertTag('batchMsgText','br')">⏎</button>
+          <button class="btn btn-xs rich-btn" onclick="openRichHelp('batchMsgText')">ℹ️</button>
+        </div>
+        <textarea id="batchMsgText" class="rich-input" rows="4" placeholder="输入消息...（支持 Among Us 富文本）"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('batchMsgModal')">取消</button>
+        <button class="btn btn-primary" onclick="sendBatchMsg()">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 私密发送 -->
+  <div class="modal-overlay" id="privateChatModal">
+    <div class="modal">
+      <h2>💬 私密发送消息</h2>
+      <div class="form-group"><label>房间</label><select id="pvtGameSelect"></select></div>
+      <div class="form-group"><label>目标玩家（按住 Ctrl 多选）</label><select id="pvtTargetSelect" multiple size="5"></select></div>
+      <div class="form-group">
+        <label>消息</label>
+        <div class="rich-bar" data-for="pvtMessage">
+          <button class="btn btn-xs rich-btn" onclick="openColorPicker('pvtMessage')" title="颜色">🅰 颜色</button>
+          <select class="rich-size" onchange="if(this.value){insertSizeTag('pvtMessage', this.value); this.selectedIndex=0;}" title="字号">
+            <option value="">大小</option>
+            <option value="60%">60%</option><option value="80%">80%</option><option value="100%">100%</option><option value="150%">150%</option><option value="200%">200%</option>
+          </select>
+          <button class="btn btn-xs rich-btn" onclick="wrapTag('pvtMessage','b')"><b>B</b></button>
+          <button class="btn btn-xs rich-btn" onclick="wrapTag('pvtMessage','i')"><i>I</i></button>
+          <button class="btn btn-xs rich-btn" onclick="wrapTag('pvtMessage','u')"><u>U</u></button>
+          <button class="btn btn-xs rich-btn" onclick="wrapTag('pvtMessage','s')"><s>S</s></button>
+          <button class="btn btn-xs rich-btn" onclick="insertTag('pvtMessage','br')">⏎</button>
+          <button class="btn btn-xs rich-btn" onclick="openRichHelp('pvtMessage')">ℹ️</button>
+        </div>
+        <textarea id="pvtMessage" class="rich-input" rows="4" placeholder="输入消息...（支持 Among Us 富文本）"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('privateChatModal')">取消</button>
+        <button class="btn btn-primary" onclick="sendPrivateChat()">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加封禁 -->
+  <div class="modal-overlay" id="addBanModal">
+    <div class="modal">
+      <h2>🚫 添加封禁</h2>
+      <div class="form-group"><label>玩家名称</label><input type="text" id="banName" placeholder="例如: Cheater123"></div>
+      <div class="form-group"><label>PUID</label><input type="text" id="banPuid" placeholder="可选: PUID"></div>
+      <div class="form-group"><label>好友代码</label><input type="text" id="banFriendCode" placeholder="可选: Name#1234"></div>
+      <div class="form-group"><label>FID</label><input type="text" id="banFid" placeholder="可选: FID (如4421/dgksw)"></div>
+      <div class="form-group"><label>IP 地址</label><input type="text" id="banIp" placeholder="可选"></div>
+      <div class="form-group"><label>原因</label><textarea id="banReason" placeholder="封禁原因..."></textarea></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('addBanModal')">取消</button>
+        <button class="btn btn-primary" onclick="confirmAddBan()">添加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建/编辑定时任务 -->
+  <div class="modal-overlay" id="scheduleModal">
+    <div class="modal">
+      <h2>⏰ 新建定时任务</h2>
+      <div class="form-group"><label>任务名称</label><input type="text" id="schedName" placeholder="如：整点清理战绩"></div>
+      <div class="form-group">
+        <label>任务类型</label>
+        <select id="schedType" onchange="onSchedTypeChange()">
+          <option value="send_chat">向指定房间发送消息</option>
+          <option value="send_group_message">发送 QQ 群通知（需开启 QQ 广播）</option>
+          <option value="clear_player_stats">清空玩家战绩</option>
+          <option value="clear_footprints">清空玩家足迹</option>
+          <option value="clear_player_times">清空在线时长</option>
+          <option value="run_ai_prompt">🤖 AI 提示词任务（到点让 AI 执行并反馈结果）</option>
+        </select>
+      </div>
+      <div class="form-group" id="schedRoomsGroup"><label>目标房间码（逗号分隔，留空=所有房间）</label><input type="text" id="schedRooms" placeholder="如 SLAILEI, PLAFRFT"></div>
+      <div class="form-group" id="schedMessageGroup"><label id="schedMessageLabel">消息内容</label><textarea id="schedMessage" rows="3" maxlength="800" placeholder="定时发送的消息内容..."></textarea></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>执行方式</label>
+          <select id="schedMode" onchange="onSchedModeChange()">
+            <option value="interval">固定间隔</option>
+            <option value="daily">每日定时</option>
+            <option value="once">单次（执行一次后自动停用）</option>
+          </select>
+        </div>
+        <div class="form-group" id="schedIntervalGroup"><label>间隔（分钟，最小 5）</label><input type="number" id="schedInterval" min="5" max="10080" value="60"></div>
+        <div class="form-group" id="schedDailyGroup" style="display:none;"><label>每日时间</label><input type="time" id="schedDaily" value="09:00"></div>
+        <div class="form-group" id="schedOnceGroup" style="display:none;"><label>执行时间（本地）</label><input type="datetime-local" id="schedOnceAt"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('scheduleModal')">取消</button>
+        <button class="btn btn-primary" onclick="createSchedule()">创建任务</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FID 说明 -->
+  <div class="modal-overlay" id="fidInfoModal">
+    <div class="modal">
+      <h2>ℹ️ 关于 FID</h2>
+      <div style="padding:8px 0;line-height:1.8;color:var(--text-secondary);">
+        <p><strong style="color:var(--accent);">FID</strong>（帆船身份标识）是<strong>帆船服务端</strong>为每名玩家计算的唯一 ID。</p>
+        <p style="margin-top:12px;">格式：<code>****/&&&&&</code>，其中 <code>*</code> = 0-9 随机数字，<code>&amp;</code> = a-z 随机小写字母。</p>
+        <p style="margin-top:12px;">由玩家 PUID 通过 SHA256 算法推导得出，<strong style="color:var(--success);">永久不变</strong>。</p>
+        <p style="margin-top:12px;font-size:13px;">🌐 <strong>跨服一致</strong>：任何使用帆船服务端的服务器，同一名玩家的 FID 始终相同。</p>
+        <p style="margin-top:12px;font-size:13px;">🔒 <strong>隐私安全</strong>：FID 无法反推 PUID，保护玩家隐私。</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="closeModal('fidInfoModal')">我知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 富文本颜色选择 -->
+  <div class="modal-overlay" id="richColorModal">
+    <div class="modal">
+      <h2>🎨 选择颜色</h2>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">点击色块插入 <code>&lt;color=#xxxxxx&gt;文本&lt;/color&gt;</code>（插入到光标处；若已选中文字则包裹选中文字）。</div>
+      <div id="richColorSwatches" style="display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:14px;"></div>
+      <div class="form-row" style="align-items:flex-end;">
+        <div class="form-group" style="flex:2;"><label>自定义颜色（HEX）</label><input type="text" id="richCustomHex" placeholder="如 FF0000 / 00FF00 / 87CEEB" maxlength="6" style="text-transform:uppercase;font-family:var(--mono);"></div>
+        <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="insertCustomColor()">插入</button></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('richColorModal')">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 富文本帮助 -->
+  <div class="modal-overlay" id="richHelpModal">
+    <div class="modal" style="max-width:640px;">
+      <h2>ℹ️ Among Us 富文本标签</h2>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Among Us（Unity 富文本）支持的标签，游戏内聊天会渲染颜色和大小。点击示例可插入到当前输入框光标处。</div>
+      <div id="richHelpList" style="display:flex;flex-direction:column;gap:6px;max-height:60vh;overflow-y:auto;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="closeModal('richHelpModal')">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI 源码警告弹窗（登录成功后） -->
+  <div id="aiWarnModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;align-items:center;justify-content:center;">
+    <div style="background:var(--bg-secondary,#1a1d24);border:1px solid var(--border,#333);border-radius:14px;max-width:480px;width:92%;padding:28px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);">
+      <div style="font-size:44px;">⚠️</div>
+      <h3 style="margin:10px 0 6px;">Warning</h3>
+      <p style="font-size:14px;line-height:1.9;color:var(--text-primary,#e8e8e8);">Most of this server's source code was generated by AI. If you encounter any bugs or vulnerabilities while using it, feedback is welcome at <a href="mailto:admin@fanchuanovo.cn" style="color:var(--accent,#4a9eff);">admin@fanchuanovo.cn</a>.</p>
+      <button class="btn btn-primary" style="width:100%;margin-top:18px;padding:10px 0;" onclick="ackAiWarning()">I understand / 我已了解</button>
+    </div>
+  </div>  <script src="js/i18n.js?v=6200912"></script>
+  <script src="js/app.js?v=6200912"></script>
+</body>
+</html>
