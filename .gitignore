@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+*.user
+*.pdb
+*.exe
+*.dll
+webadmin_*.json
+config.json
+logs/
+上传说明.md

@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Fmpostor.Api\Fmpostor.Api.csproj" />
+    <PackageReference Include="Impostor.Hazel" Version="1.0.1" />
+  </ItemGroup>
+
+</Project>
