@@ -2763,7 +2763,7 @@ let updateInfo = null;
 
 async function checkUpdate() {
   toast(t('正在检查更新...'));
-  const d = await api('GET', '/update/check');
+  const d = await api('GET', '/api/update/check');
   if (!d) return;
   if (d.success === false) { toast(d.message || t('检查更新失败'), 'warn'); return; }
   if (!d.updateAvailable) { toast(t('当前已是最新版本') + '（' + (d.currentTag || d.currentVersion || '') + '）'); return; }
@@ -2789,7 +2789,7 @@ async function applyUpdateNow() {
   if (!updateInfo) return;
   closeUpdateModal();
   toast(t('正在下载更新，服务端将自动重启...'), 'warn');
-  const d = await api('POST', '/update/apply');
+  const d = await api('POST', '/api/update/apply');
   if (!d || d.success === false) { toast((d && d.message) || t('更新失败'), 'warn'); return; }
   toast(t('更新包已下载，服务端正在重启...'), 'warn');
   pollAfterUpdate();
@@ -2800,7 +2800,7 @@ function pollAfterUpdate() {
   const timer = setInterval(async () => {
     n++;
     try {
-      const r = await api('GET', '/ping');
+      const r = await api('GET', '/api/ping');
       if (r && r.success) {
         clearInterval(timer);
         toast(t('更新完成，页面即将刷新'));
