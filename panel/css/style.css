@@ -587,9 +587,13 @@ select[multiple] { background-image: none; }
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 5px 8px;
-  font-size: 12px;
+  padding: 2px 4px;
+  font-size: 11px;
+  max-width: 96px;
+  min-width: 0;
+  height: 26px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 body.role-user .admin-only {
   display: none !important;

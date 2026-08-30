@@ -135,27 +135,85 @@
   function translateTextNode(node) {
     var text = node.nodeValue;
     if (!text || !text.trim()) return;
+    // 用户生成内容不翻译（聊天消息 / AI 对话气泡正文 / 发送者昵称），
+    // 避免把玩家昵称、聊天文本里的词误替换成外语。
+    var pEl = node.parentElement;
+    if (pEl && pEl.classList && (pEl.classList.contains('chat-msg') || pEl.classList.contains('ai-bubble-content') || pEl.classList.contains('sender'))) return;
     var trimmed = text.trim();
-    var key = node.parentElement && node.parentElement.dataset && node.parentElement.dataset.zh !== undefined
-      ? node.parentElement.dataset.zh : trimmed;
+    // 以"原始简体文本"为词典键：多文本节点父元素共用 data-zh 会串键，
+    // 这里用 WeakMap 按文本节点独立缓存原文（含内部换行/缩进），
+    // 查找时把空白归一化，保证跨语言来回切换（zh-CN→zh-TW→en→…）都稳定。
+    var raw = _origMap ? _origMap.get(node) : undefined;
+    var key = raw !== undefined ? raw.replace(/\s+/g, ' ') : trimmed.replace(/\s+/g, ' ');
     var translated = t(key);
-    if (translated !== key) {
-      if (node.parentElement && node.parentElement.dataset.zh === undefined) node.parentElement.dataset.zh = trimmed;
-      node.nodeValue = text.replace(trimmed, translated);
+    if (translated === key && langSubstrMode) {
+      // 兜底：拼接串（如 "共 3 条记录"）整串词典命中不了，
+      // 按键长度降序做子串替换，覆盖动态内容里的词组（仅替换长度>=2 的键）。
+      // 注意：替换必须在"原始简体"（key）上进行，否则 en→zh-TW 切换时
+      // 已翻译文本里找不到中文键，导致永远停留在旧语言。
+      var lang = localStorage.getItem('webpanel_lang') || 'zh-CN';
+      var dict = window.PANEL_I18N[lang] || {};
+      translated = key;
+      var keys = getSubstrKeys(lang);
+      for (var i = 0; i < keys.length; i++) {
+        if (translated.indexOf(keys[i]) !== -1) translated = translated.split(keys[i]).join(dict[keys[i]]);
+      }
     }
+    if (translated !== key) {
+      if (_origMap && raw === undefined) _origMap.set(node, trimmed);
+      // 仅在实际内容发生变化时才写回，避免恒等写回对
+      // MutationObserver 产生 characterData 记录导致无限循环。
+      var newVal = text.replace(trimmed, translated);
+      if (newVal !== text) node.nodeValue = newVal;
+    }
+  }
+  var langSubstrMode = true;
+  var _substrKeys = null;
+  function getSubstrKeys(lang) {
+    if (!_substrKeys) {
+      var dict = window.PANEL_I18N[lang] || {};
+      _substrKeys = Object.keys(dict)
+        .filter(function (k) { return k.length >= 2 && k.length <= 24; })
+        .sort(function (a, b) { return b.length - a.length; });
+    }
+    return _substrKeys;
+  }
+  // 每个文本节点的简体原文（WeakMap：节点被 innerHTML 重建后自动回收）
+  var _origMap = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+  var _origDocTitle = null;
+
+  function restoreZh() {
+    // 文本节点：按 WeakMap 缓存还原
+    if (_origMap) {
+      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+      var nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(function (n) {
+        var o = _origMap.get(n);
+        if (o !== undefined) { n.nodeValue = o; _origMap.delete(n); }
+      });
+    }
+    document.querySelectorAll('[data-zh-placeholder]').forEach(function (el) {
+      el.setAttribute('placeholder', el.getAttribute('data-zh-placeholder'));
+      el.removeAttribute('data-zh-placeholder');
+    });
+    document.querySelectorAll('[data-zh-title]').forEach(function (el) {
+      el.setAttribute('title', el.getAttribute('data-zh-title'));
+      el.removeAttribute('data-zh-title');
+    });
+    if (_origDocTitle !== null) { document.title = _origDocTitle; _origDocTitle = null; }
   }
 
   window.applyI18n = function () {
+    _substrKeys = null; // 词典可能已扩充，重置缓存
     var lang = localStorage.getItem('webpanel_lang') || 'zh-CN';
-    if (lang === 'zh-CN') {
-      // 切回简体：用缓存的原文还原
-      document.querySelectorAll('[data-zh]').forEach(function (el) {
-        var z = el.getAttribute('data-zh');
-        if (el.childNodes.length === 1 && el.childNodes[0].nodeType === 3) el.childNodes[0].nodeValue = z;
-        if (el.dataset.zhPlaceholder !== undefined) { el.setAttribute('placeholder', el.dataset.zhPlaceholder); }
-        delete el.dataset.zh; delete el.dataset.zhPlaceholder;
-      });
-      return;
+    if (lang === 'zh-CN') { restoreZh(); return; }
+    // 页面标题
+    var dt = document.title;
+    if (dt) {
+      if (_origDocTitle === null) _origDocTitle = dt;
+      var dtt = t(dt);
+      if (dtt !== dt) document.title = dtt;
     }
     // 文本节点
     var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
@@ -172,15 +230,36 @@
     });
     document.querySelectorAll('[title]').forEach(function (el) {
       var v = el.getAttribute('title');
+      if (!v) return;
+      if (el.dataset.zhTitle === undefined) el.dataset.zhTitle = v;
       var tr = t(v);
       if (tr !== v) el.setAttribute('title', tr);
     });
   };
+
+  // 动态内容自动翻译：setLang 先翻译、switchTab 后异步渲染的时序问题，
+  // 以及 refreshAll 中 renderBans/renderLogs 在 applyI18n 之后执行的问题，
+  // 统一用 MutationObserver 兜底 —— 任何新插入/变更的 DOM 都会重新应用翻译。
+  // 仅监听 childList + characterData（不监听 attributes），applyI18n 自身
+  // 的写入要么不产生记录、要么是幂等的（值不变不触发），因此不会死循环。
+  var _observerTimer = null;
+  function scheduleApplyI18n() {
+    if (_observerTimer) return;
+    _observerTimer = setTimeout(function () {
+      _observerTimer = null;
+      var lang = localStorage.getItem('webpanel_lang') || 'zh-CN';
+      if (lang === 'zh-CN') return;
+      try { applyI18n(); } catch (e) { }
+    }, 40);
+  }
 
   document.addEventListener('DOMContentLoaded', function () {
     var sel = document.getElementById('langSelect');
     var lang = localStorage.getItem('webpanel_lang') || 'zh-CN';
     if (sel) sel.value = lang;
     if (lang !== 'zh-CN') applyI18n();
+    if (typeof MutationObserver !== 'undefined' && document.body) {
+      new MutationObserver(scheduleApplyI18n).observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
   });
 })();

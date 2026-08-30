@@ -287,8 +287,9 @@ async function refreshAll() {
   if (!stats) return;
   $('statGames').textContent = stats.totalGames ?? 0; $('statPlayers').textContent = stats.totalPlayers ?? 0;
   if (players) renderPlayers(players); if (games) renderGames(games);
-  if (typeof currentLang === 'function' && currentLang() !== 'zh-CN' && typeof applyI18n === 'function') applyI18n(); // refreshAll-end-i18n
   if (bans) renderBans(bans); if (logs) renderLogs(logs);
+  // refreshAll-end-i18n：放在所有渲染之后，确保封禁/日志等动态表格也被翻译
+  if (typeof currentLang === 'function' && currentLang() !== 'zh-CN' && typeof applyI18n === 'function') applyI18n();
 }
 
 async function manualRefresh() {
@@ -370,7 +371,7 @@ function toggleSelectAll(kind) {
 function updateSelCount(kind) {
   const set = kind === 'players' ? state.selectedPlayers : state.selectedGames;
   const el = kind === 'players' ? $('playersSelCount') : $('gamesSelCount');
-  if (el) el.textContent = kind === 'players' ? ('已选 ' + set.size + ' 名玩家') : ('已选 ' + set.size + ' 个房间');
+  if (el) el.textContent = kind === 'players' ? (t('已选 ') + set.size + t('名玩家')) : (t('已选 ') + set.size + t('个房间'));
 }
 
 async function batchKickPlayers() {
@@ -393,7 +394,7 @@ function openBatchMsg(kind) {
   const set = kind === 'players' ? state.selectedPlayers : state.selectedGames;
   if (!set.size) { toast('请先选择' + (kind === 'players' ? '玩家' : '房间'), 'error'); return; }
   state.batchMsgKind = kind;
-  $('batchMsgTarget').textContent = '目标：' + set.size + (kind === 'players' ? ' 名玩家' : ' 个房间');
+  $('batchMsgTarget').textContent = t('目标：') + set.size + (kind === 'players' ? t('名玩家') : t('个房间'));
   $('batchMsgText').value = '';
   openModal('batchMsgModal');
 }
@@ -796,31 +797,31 @@ async function loadSchedule() {
   if (!d || !d.success) { box.innerHTML = '<div class="empty-state"><p>无法加载定时任务（需要服务器为 Turbo-620 或更高）</p></div>'; return; }
   const list = d.tasks || [];
   if (!list.length) { box.innerHTML = '<div class="empty-state"><h3>还没有定时任务</h3><p>点击右上角"新建任务"创建，例如每日整点清理战绩</p></div>'; return; }
-  box.innerHTML = list.map(t => {
-    const meta = SCHED_TYPES[t.type] || { ico: '⏰', name: t.type };
-    const when = t.runOnceAt
-      ? '单次 ' + fmtDate(t.runOnceAt) + (t.enabled ? '' : ' · 已完成')
-      : t.intervalMinutes > 0
-        ? '每 ' + esc(t.intervalMinutes) + ' 分钟'
-        : '每天 ' + esc(t.dailyTime || '--:--');
+  box.innerHTML = list.map(task => {
+    const meta = SCHED_TYPES[task.type] || { ico: '⏰', name: task.type };
+    const when = task.runOnceAt
+      ? t('单次 ') + fmtDate(task.runOnceAt) + (task.enabled ? '' : t(' · 已完成'))
+      : task.intervalMinutes > 0
+        ? t('每 ') + esc(task.intervalMinutes) + t(' 分钟')
+        : t('每天 ') + esc(task.dailyTime || '--:--');
     let detail = '';
-    if (t.type === 'send_chat') detail = '房间: ' + ((t.gameCodes && t.gameCodes.length) ? t.gameCodes.join(', ') : '全部') + ' · 消息: ' + (t.message || '');
-    else if (t.type === 'send_group_message') detail = '通知内容: ' + (t.message || '');
-    else if (t.type === 'run_ai_prompt') detail = '提示词: ' + ((t.message || '').length > 80 ? (t.message || '').slice(0, 80) + '…' : (t.message || ''));
-    const last = t.lastRunAt
-      ? '上次执行: ' + fmtDate(t.lastRunAt) + (t.lastRunOk === true ? ' ✅' : t.lastRunOk === false ? ' ❌ ' + (t.lastRunResult || '') : ' ⏳ ' + (t.lastRunResult || ''))
-      : '尚未执行';
-    return '<div class="sched-card' + (t.enabled ? '' : ' disabled') + '">' +
+    if (task.type === 'send_chat') detail = t('房间: ') + ((task.gameCodes && task.gameCodes.length) ? task.gameCodes.join(', ') : t('全部')) + t(' · 消息: ') + (task.message || '');
+    else if (task.type === 'send_group_message') detail = t('通知内容: ') + (task.message || '');
+    else if (task.type === 'run_ai_prompt') detail = t('提示词: ') + ((task.message || '').length > 80 ? (task.message || '').slice(0, 80) + '…' : (task.message || ''));
+    const last = task.lastRunAt
+      ? t('上次执行: ') + fmtDate(task.lastRunAt) + (task.lastRunOk === true ? ' ✅' : task.lastRunOk === false ? ' ❌ ' + (task.lastRunResult || '') : ' ⏳ ' + (task.lastRunResult || ''))
+      : t('尚未执行');
+    return '<div class="sched-card' + (task.enabled ? '' : ' disabled') + '">' +
       '<div class="sched-ico">' + meta.ico + '</div>' +
       '<div class="sched-main">' +
-        '<div class="sched-name">' + esc(t.name) + ' <span class="badge ' + (t.enabled ? 'badge-green' : 'badge-gray') + '">' + (t.enabled ? '启用' : '停用') + '</span></div>' +
+        '<div class="sched-name">' + esc(task.name) + ' <span class="badge ' + (task.enabled ? 'badge-green' : 'badge-gray') + '">' + (task.enabled ? '启用' : '停用') + '</span></div>' +
         '<div class="sched-meta">' + esc(meta.name) + ' · ' + when + (detail ? '<br>' + esc(detail) : '') + '</div>' +
-        '<div class="sched-last muted">' + esc(last) + (t.runCount ? ' · 共执行 ' + t.runCount + ' 次' : '') + '</div>' +
+        '<div class="sched-last muted">' + esc(last) + (task.runCount ? ' · 共执行 ' + task.runCount + ' 次' : '') + '</div>' +
       '</div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-        '<button class="btn btn-info btn-xs" onclick="runScheduleNow(' + jsq(t.id) + ')">立即执行</button>' +
-        '<button class="btn btn-warning btn-xs" onclick="toggleSchedule(' + jsq(t.id) + ',' + (t.enabled ? 'false' : 'true') + ')">' + (t.enabled ? '停用' : '启用') + '</button>' +
-        '<button class="btn btn-danger btn-xs" onclick="deleteSchedule(' + jsq(t.id) + ',' + jsq(t.name) + ')">删除</button>' +
+        '<button class="btn btn-info btn-xs" onclick="runScheduleNow(' + jsq(task.id) + ')">立即执行</button>' +
+        '<button class="btn btn-warning btn-xs" onclick="toggleSchedule(' + jsq(task.id) + ',' + (task.enabled ? 'false' : 'true') + ')">' + (task.enabled ? '停用' : '启用') + '</button>' +
+        '<button class="btn btn-danger btn-xs" onclick="deleteSchedule(' + jsq(task.id) + ',' + jsq(task.name) + ')">删除</button>' +
       '</div></div>';
   }).join('');
 }
@@ -844,15 +845,15 @@ function onSchedTypeChange() {
   const msg = $('schedMessage');
   if (label && msg) {
     if (isAi) {
-      label.textContent = 'AI 提示词（到点后系统在后台发给 AI，执行结果反馈到任务状态与 AI 聊天记录）';
+      label.textContent = t('AI 提示词（到点后系统在后台发给 AI，执行结果反馈到任务状态与 AI 聊天记录）');
       msg.setAttribute('maxlength', '4000');
       msg.rows = 5;
-      msg.placeholder = '如：查看今天的行为日志，总结异常玩家并给出处理建议…';
+      msg.placeholder = t('如：查看今天的行为日志，总结异常玩家并给出处理建议…');
     } else {
-      label.textContent = '消息内容';
+      label.textContent = t('消息内容');
       msg.setAttribute('maxlength', '800');
       msg.rows = 3;
-      msg.placeholder = '定时发送的消息内容...';
+      msg.placeholder = t('定时发送的消息内容...');
     }
   }
 }
@@ -1035,7 +1036,7 @@ async function loadPlayerTimes() {
   if (!d || !d.success) { tb.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>无法加载</h3></div></td></tr>'; return; }
   const list = Object.values(d.players || {});
   if (!list.length) { tb.innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>暂无记录</h3></div></td></tr>'; return; }
-  const fmtMin = (m) => { const h = Math.floor(m / 60), mm = m % 60; return (h > 0 ? h + '小时' : '') + mm + '分钟'; };
+  const fmtMin = (m) => { const h = Math.floor(m / 60), mm = m % 60; return (h > 0 ? h + t('小时') : '') + mm + t('分钟'); };
   tb.innerHTML = list.slice().sort((a, b) => (b.totalPlayTimeMinutes || 0) - (a.totalPlayTimeMinutes || 0)).map(p =>
     '<tr><td style="font-family:monospace;font-size:12px;color:var(--accent);">' + esc(p.friendCode || '-') + '</td>' +
     '<td>' + esc(p.playerName || '-') + '</td>' +
@@ -1249,7 +1250,7 @@ async function loadReplays() {
     if (r.crewmateWin === 'crewmate') winText = '<span class="badge badge-green">船员胜利</span>';
     else if (r.crewmateWin === 'impostor') winText = '<span class="badge badge-red">内鬼胜利</span>';
     else winText = '<span class="badge badge-yellow">中断</span>';
-    const dur = r.durationSeconds ? Math.floor(r.durationSeconds / 60) + '分' + (r.durationSeconds % 60) + '秒' : '-';
+    const dur = r.durationSeconds ? Math.floor(r.durationSeconds / 60) + t('分') + (r.durationSeconds % 60) + t('秒') : '-';
     return '<tr><td style="font-family:monospace;color:var(--accent);font-weight:600;">' + esc(r.gameCode) + '</td>' +
       '<td>' + esc(r.map || '-') + '</td><td style="font-size:12px;color:var(--text-muted)">' + fmtDate(r.startedAt) + '</td>' +
       '<td>' + dur + '</td><td>' + winText + '</td>' +
@@ -1289,7 +1290,7 @@ async function viewReplay(file) {
     '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">' +
     '<h3 style="margin:0;">📼 复盘 ' + esc(r.gameCode) + '</h3>' +
     '<span class="badge badge-blue">' + esc(r.map || '-') + '</span>' + winText + '</div>' +
-    '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">开始 ' + fmtDate(r.startedAt) + ' · 时长 ' + Math.floor((r.durationSeconds || 0) / 60) + '分' + (r.durationSeconds || 0) % 60 + '秒 · 结果 ' + esc(r.result) + '</div>' +
+    '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">' + t('开始 ') + fmtDate(r.startedAt) + t(' · 时长 ') + Math.floor((r.durationSeconds || 0) / 60) + t('分') + (r.durationSeconds || 0) % 60 + t('秒') + t(' · 结果 ') + esc(r.result) + '</div>' +
     '<div style="display:flex;gap:16px;flex-wrap:wrap;">' +
       '<div style="flex:1;min-width:280px;"><div style="font-weight:600;margin-bottom:6px;">玩家与身份</div><table class="compact"><thead><tr><th>名称</th><th>好友码</th><th>身份</th><th>阵营</th><th>状态</th></tr></thead><tbody>' + players + '</tbody></table></div>' +
       '<div style="flex:1.4;min-width:320px;"><div style="font-weight:600;margin-bottom:6px;">事件时间线</div>' + (events || '<span style="color:var(--text-muted);">无事件</span>') + '</div>' +
@@ -1316,7 +1317,7 @@ async function loadFootprints() {
   tb.innerHTML = list.map(p => {
     const hours = Math.floor(p.totalOnlineSeconds / 3600);
     const mins = Math.floor((p.totalOnlineSeconds % 3600) / 60);
-    const online = (hours > 0 ? hours + '小时' : '') + mins + '分钟';
+    const online = (hours > 0 ? hours + t('小时') : '') + mins + t('分钟');
     return '<tr><td><strong>' + esc(p.name || '-') + '</strong></td>' +
       '<td style="font-family:monospace;font-size:12px;color:var(--accent)">' + esc(p.friendCode || '-') + '</td>' +
       '<td style="font-family:monospace;font-size:11px;color:var(--text-muted)">' + esc(p.puid || '-') + '</td>' +
@@ -1337,12 +1338,12 @@ async function viewFootprint(key) {
   const sessions = (fp.sessions || []).slice(0, 30).map(s =>
     '<div style="padding:4px 0;border-bottom:1px dashed var(--border);font-size:13px;">' +
     '<span style="color:var(--text-muted);margin-right:8px;">' + fmtDate(s.start) + '</span> → ' +
-    (s.end ? fmtDate(s.end) : '进行中') + ' · ' + Math.floor((s.durationSeconds || 0) / 60) + '分钟</div>').join('');
+    (s.end ? fmtDate(s.end) : '进行中') + ' · ' + Math.floor((s.durationSeconds || 0) / 60) + t('分钟') + '</div>').join('');
   box.style.display = 'block';
   box.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;">' +
     '<h3 style="margin:0 0 8px;">🦶 ' + esc(fp.name || fp.key) + ' 的足迹档案</h3>' +
     '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">好友码 ' + esc(fp.friendCode || '-') + ' · PUID ' + esc(fp.puid || '-') + ' · 首次 ' + fmtDate(fp.firstSeen) + ' · 最近 ' + fmtDate(fp.lastSeen) + '</div>' +
-    '<div style="font-size:13px;margin-bottom:12px;"><strong>累计在线：</strong>' + Math.floor(fp.totalOnlineSeconds / 3600) + '小时' + Math.floor((fp.totalOnlineSeconds % 3600) / 60) + '分钟 · <strong>会话数：</strong>' + (fp.sessions || []).length + '</div>' +
+    '<div style="font-size:13px;margin-bottom:12px;"><strong>' + t('累计在线：') + '</strong>' + Math.floor(fp.totalOnlineSeconds / 3600) + t('小时') + Math.floor((fp.totalOnlineSeconds % 3600) / 60) + t('分钟') + ' · <strong>' + t('会话数：') + '</strong>' + (fp.sessions || []).length + '</div>' +
     '<div style="font-size:13px;margin-bottom:12px;"><strong>常用 IP：</strong>' + (fp.ips || []).map(ip => '<span class="badge badge-blue" style="margin:1px;">' + esc(ip) + '</span>').join('') + '</div>' +
     '<div style="font-weight:600;margin-bottom:6px;">最近会话（最多30条）</div>' + (sessions || '<span style="color:var(--text-muted);">无会话记录</span>') +
     '<div style="margin-top:14px;"><button class="btn btn-ghost btn-sm" onclick="$(\'footprintDetail\').style.display=\'none\'">收起</button></div></div>';
@@ -1372,7 +1373,7 @@ async function loadDashboard() {
   $('dashChart').innerHTML = hist.length
     ? hist.map(h => '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:2px;">' +
         '<span style="font-size:10px;color:var(--text-muted);">' + esc(h.players) + '</span>' +
-        '<div style="width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:0.85;height:' + Math.max(3, Math.round((h.players / max) * 90)) + 'px;" title="' + esc(h.time) + ' ' + esc(h.players) + '人"></div>' +
+        '<div style="width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:0.85;height:' + Math.max(3, Math.round((h.players / max) * 90)) + 'px;" title="' + esc(h.time) + ' ' + esc(h.players) + t('人') + '"></div>' +
         '<span style="font-size:9px;color:var(--text-muted);">' + esc(h.time) + '</span></div>').join('')
     : '<span style="color:var(--text-muted);font-size:13px;align-self:center;">等待采样数据...</span>';
 
@@ -1405,7 +1406,7 @@ function renderAiBubble(role, content) {
   box.insertAdjacentHTML('beforeend',
     '<div style="display:flex;flex-direction:column;align-items:' + (isUser ? 'flex-end' : 'flex-start') + ';margin:10px 0;">' +
       badge +
-      '<div style="max-width:80%;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;' +
+      '<div class="ai-bubble-content" style="max-width:80%;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;' +
       (isUser
         ? 'background:var(--accent);color:#fff;border-bottom-right-radius:2px;'
         : 'background:var(--bg-tertiary);border:1px solid var(--border);border-bottom-left-radius:2px;') + '">' +
@@ -1672,7 +1673,7 @@ const AGENT_TOOLS = {
     run: async () => {
       const d = await api('GET', '/api/games');
       if (!Array.isArray(d)) return { ok: false, summary: '无法获取房间列表' };
-      const list = d.map(g => g.code + '(' + g.hostName + ' ' + g.playerCount + '人 ' + g.gameState + ')');
+      const list = d.map(g => g.code + '(' + g.hostName + ' ' + g.playerCount + t('人') + ' ' + g.gameState + ')');
       return { ok: true, summary: '共 ' + d.length + ' 个活跃房间：' + (list.join('；') || '无') };
     },
   },
@@ -1725,7 +1726,7 @@ const AGENT_TOOLS = {
     run: async () => {
       const d = await api('GET', '/api/replays');
       if (!d || !d.success) return { ok: false, summary: '无法获取复盘列表' };
-      const list = (d.replays || []).map(r => r.gameCode + ' ' + (r.map || '-') + ' ' + r.result + (r.durationSeconds ? ' ' + Math.floor(r.durationSeconds / 60) + '分' : ''));
+      const list = (d.replays || []).map(r => r.gameCode + ' ' + (r.map || '-') + ' ' + r.result + (r.durationSeconds ? ' ' + Math.floor(r.durationSeconds / 60) + t('分') : ''));
       return { ok: true, summary: '共 ' + list.length + ' 局复盘：' + (list.join('；') || '无') };
     },
   },
@@ -2036,7 +2037,7 @@ const AGENT_TOOLS = {
     run: async () => {
       const d = await api('GET', '/api/titles');
       if (!d || !d.success) return { ok: false, summary: '无法获取称号设置' };
-      return { ok: true, summary: '启用=' + (d.enableTitle ? '是' : '否') + ' 称号' + (d.titles || []).length + '个(' + (d.titles || []).map(t => t.name).join('、') + ') 已分配' + (d.players || []).length + '人' };
+      return { ok: true, summary: t('启用=') + (d.enableTitle ? '是' : '否') + t('称号') + (d.titles || []).length + '个(' + (d.titles || []).map(t => t.name).join('、') + ') ' + t('已分配') + (d.players || []).length + t('人') };
     },
   },
   get_monitor_settings: {
@@ -2261,7 +2262,7 @@ const AGENT_TOOLS = {
       if (!d || !d.success) return { ok: false, summary: '无法获取定时任务' };
       const list = d.tasks || [];
       if (!list.length) return { ok: true, summary: '暂无定时任务' };
-      return { ok: true, summary: list.slice(0, 30).map(t => t.id.slice(0, 8) + ' ' + t.name + '[' + t.type + '] ' + (t.enabled ? '启用' : '停用') + ' ' + (t.runOnceAt ? '单次' : t.intervalMinutes > 0 ? '每' + t.intervalMinutes + '分钟' : '每日' + (t.dailyTime || ''))).join('；') };
+      return { ok: true, summary: list.slice(0, 30).map(t => t.id.slice(0, 8) + ' ' + t.name + '[' + t.type + '] ' + (t.enabled ? '启用' : '停用') + ' ' + (t.runOnceAt ? '单次' : t.intervalMinutes > 0 ? '每' + t.intervalMinutes + t('分钟') : '每日' + (t.dailyTime || ''))).join('；') };
     },
   },
   create_scheduled_task: {
