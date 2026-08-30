@@ -2757,3 +2757,57 @@ document.addEventListener('DOMContentLoaded', function() {
   safe('chatMessage', 'keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPublicChat(); } });
   safe('aiChatInput', 'keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAiChat(); } });
 });
+
+// ============== 自动更新（Turbo-620：检查 / 下载 / 重启） ==============
+let updateInfo = null;
+
+async function checkUpdate() {
+  toast(t('正在检查更新...'));
+  const d = await api('GET', '/update/check');
+  if (!d) return;
+  if (d.success === false) { toast(d.message || t('检查更新失败'), 'warn'); return; }
+  if (!d.updateAvailable) { toast(t('当前已是最新版本') + '（' + (d.currentTag || d.currentVersion || '') + '）'); return; }
+  updateInfo = d;
+  const body = $('umBody'), notes = $('umNotes');
+  if (body) {
+    body.innerHTML = '• ' + t('当前版本') + ': <b>' + esc(d.currentVersion || '') + '</b><br>' +
+      '• ' + t('最新版本') + ': <b>' + esc(d.latestVersion || d.latestTag || '') + '</b>（' + esc(d.latestTag || '') + '）' +
+      (d.publishedAt ? '<br>• ' + t('发布时间') + ': ' + esc(String(d.publishedAt).slice(0, 10)) : '') +
+      '<br><span style="color:var(--text-secondary,#9aa);">' + t('即将自动下载对应系统版本并重启服务端') + '</span>';
+  }
+  if (notes) notes.textContent = (d.releaseNotes && String(d.releaseNotes).trim()) ? d.releaseNotes : t('（无更新日志）');
+  const m = $('updateModal');
+  if (m) { m.style.display = 'flex'; if (typeof applyI18n === 'function') applyI18n(); }
+}
+
+function closeUpdateModal() {
+  const m = $('updateModal');
+  if (m) m.style.display = 'none';
+}
+
+async function applyUpdateNow() {
+  if (!updateInfo) return;
+  closeUpdateModal();
+  toast(t('正在下载更新，服务端将自动重启...'), 'warn');
+  const d = await api('POST', '/update/apply');
+  if (!d || d.success === false) { toast((d && d.message) || t('更新失败'), 'warn'); return; }
+  toast(t('更新包已下载，服务端正在重启...'), 'warn');
+  pollAfterUpdate();
+}
+
+function pollAfterUpdate() {
+  let n = 0;
+  const timer = setInterval(async () => {
+    n++;
+    try {
+      const r = await api('GET', '/ping');
+      if (r && r.success) {
+        clearInterval(timer);
+        toast(t('更新完成，页面即将刷新'));
+        setTimeout(() => location.reload(), 1500);
+        return;
+      }
+    } catch (e) { /* server restarting */ }
+    if (n > 100) { clearInterval(timer); toast(t('等待服务端重启超时，请手动刷新页面'), 'warn'); }
+  }, 3000);
+}

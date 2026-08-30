@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <!-- Turbo-620 Enterprise UI. CSP 基线：面板使用内联处理器与用户自定义服务器地址 -->
+  <!-- Turbo-630 Enterprise UI. CSP 基线：面板使用内联处理器与用户自定义服务器地址 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>帆船控制台 · Among Us 服务器管理</title>
   <link rel="stylesheet" href="css/style.css?v=6200912">
@@ -37,7 +37,7 @@
           <div class="login-head">
             <div class="brand-mark">⚓</div>
             <h2>登录控制台</h2>
-            <p>连接到你的帆船服务器 · Turbo-620</p>
+            <p>连接到你的帆船服务器 · Turbo-630</p>
             <select class="lang-select" style="margin-top:8px;" onchange="setLang(this.value)" title="Language / 语言 / 語言">
               <option value="zh-CN">简体中文</option>
               <option value="zh-TW">繁體中文</option>
@@ -103,6 +103,7 @@
           </div>
         </div>
       </div>
+      <button id="updateBtn" class="btn btn-ghost btn-sm" onclick="checkUpdate()" title="检查更新">⬆ <span data-i18n="检查更新">检查更新</span></button>
       <button id="refreshBtn" class="btn btn-ghost btn-sm" onclick="manualRefresh()">🔄 刷新</button>
       <button class="btn btn-ghost btn-sm" onclick="goToServers()">🖥 切换服务器</button>
       <span class="user-chip" id="userDisplay">👤 -</span>
@@ -1076,10 +1077,25 @@
       <button class="btn btn-primary" style="width:100%;margin-top:18px;padding:10px 0;" onclick="ackAiWarning()">I understand / 我已了解</button>
     </div>
   </div>
-  <script src="js/i18n.js?v=6200920"></script>
-  <script src="js/i18n-extra.js?v=6200920"></script>
-  <script src="js/i18n-extra2.js?v=6200920"></script>
-  <script src="js/i18n-extra3.js?v=6200920"></script>
-  <script src="js/app.js?v=6200920"></script>
+
+  <!-- 检查更新弹窗 -->
+  <div id="updateModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99998;align-items:center;justify-content:center;">
+    <div style="background:var(--bg-secondary,#1a1d24);border:1px solid var(--border,#333);border-radius:14px;max-width:600px;width:94%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5);">
+      <h3 style="margin:0 0 8px;">⬆ <span data-i18n="检查更新">检查更新</span></h3>
+      <div id="umBody" style="font-size:13px;line-height:1.9;color:var(--text-primary,#e8e8e8);"></div>
+      <div style="font-size:12px;color:var(--text-secondary,#9aa);margin:10px 0 4px;" data-i18n="更新日志">更新日志</div>
+      <div id="umNotes" style="max-height:260px;overflow:auto;background:var(--bg-tertiary,#111318);border:1px solid var(--border,#333);border-radius:8px;padding:10px;font-size:12px;white-space:pre-wrap;user-select:text;">-</div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="applyUpdateNow()" data-i18n="自动更新">自动更新</button>
+        <button class="btn btn-ghost" style="flex:1;" onclick="closeUpdateModal()" data-i18n="取消">取消</button>
+      </div>
+    </div>
+  </div>
+  <script src="js/i18n.js?v=6300901"></script>
+  <script src="js/i18n-extra.js?v=6300901"></script>
+  <script src="js/i18n-extra2.js?v=6300901"></script>
+  <script src="js/i18n-extra3.js?v=6300901"></script>
+  <script src="js/i18n-extra4.js?v=6300901"></script>
+  <script src="js/app.js?v=6300901"></script>
 </body>
 </html>

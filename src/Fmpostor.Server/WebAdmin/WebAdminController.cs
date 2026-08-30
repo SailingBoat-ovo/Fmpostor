@@ -40,9 +40,10 @@ public class WebAdminController : ControllerBase
     private readonly AdminStatsService _adminStats;
     private readonly PlayerTimeService _playerTimes;
     private readonly ScheduleService _schedule;
+    private readonly UpdateService _update;
     private readonly ILogger<WebAdminController> _logger;
 
-    private static readonly string PluginVersion = "Turbo-620.0-20260826";
+    private static readonly string PluginVersion = "Turbo-630.0-20260829";
 
     public WebAdminController(
         GameTrackerService tracker,
@@ -70,6 +71,7 @@ public class WebAdminController : ControllerBase
         AdminStatsService adminStats,
         PlayerTimeService playerTimes,
         ScheduleService schedule,
+        UpdateService update,
         ILogger<WebAdminController> logger)
     {
         _tracker = tracker;
@@ -97,6 +99,7 @@ public class WebAdminController : ControllerBase
         _adminStats = adminStats;
         _playerTimes = playerTimes;
         _schedule = schedule;
+        _update = update;
         _logger = logger;
     }
 
@@ -2239,6 +2242,35 @@ public class WebAdminController : ControllerBase
             return NotFound(new { success = false, message = "Task not found." });
         _logService.AddLog("schedule_delete", "Deleted scheduled task: " + (task?.Name ?? id), GetClientIp());
         return Ok(new { success = true, message = "Task deleted." });
+    }
+
+    /// <summary>GET /webadmin/api/update/check — compare the running version with the latest GitHub release (admin).</summary>
+    [HttpGet("api/update/check")]
+    public async Task<IActionResult> CheckUpdate()
+    {
+        var denied = AdminGuard();
+        if (denied != null) return denied;
+        try
+        {
+            var result = await _update.CheckAsync();
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update] check failed");
+            return StatusCode(502, new { success = false, message = "Update check failed: " + ex.Message });
+        }
+    }
+
+    /// <summary>POST /webadmin/api/update/apply — download the matching release asset, stage it and restart (admin).</summary>
+    [HttpPost("api/update/apply")]
+    public async Task<IActionResult> ApplyUpdate()
+    {
+        var denied = AdminGuard();
+        if (denied != null) return denied;
+        var (ok, message) = await _update.ApplyAsync();
+        _logService.AddLog("update_apply", message, GetClientIp());
+        return Ok(new { success = ok, message });
     }
 
 }

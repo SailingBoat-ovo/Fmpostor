@@ -250,6 +250,7 @@ namespace Fmpostor.Server
                     services.AddSingleton<RoomMonitorService>();
                     services.AddSingleton<IEventListener>(p => p.GetRequiredService<RoomMonitorService>());
                     services.AddSingleton<ScheduleService>();
+            services.AddSingleton<UpdateService>();
                     services.AddSingleton<RoomTransferService>();
                     services.AddHttpClient();
                 })
