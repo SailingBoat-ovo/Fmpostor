@@ -597,7 +597,314 @@ public class AiService
         return _gameContexts.GetOrAdd(playerKey, _ => new List<AiChatMessage>());
     }
 
-    // ========== 联网搜索（自定义端点：cn.bing.com） ==========
+    // ========== 联网（按需：规划器生成搜索词 / 直访用户给的网址，Turbo-640） ==========
+
+    // 纯问候/礼貌/应答（整条消息只有这些内容）——永远不联网。
+    private static readonly System.Text.RegularExpressions.Regex GreetingOnlyPattern = new(
+        "^(你好|您好|哈喽|嗨|halo|hello|hi|hey|yo|在吗|在么|早上好|中午好|下午好|晚上好|晚安|谢谢|多谢|感谢|拜拜|再见|辛苦了|ok|okay|好的|嗯|哦|哈)[!！?？.。,，~～\\s]*$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // 短消息里的身份/能力问题（我是谁/你是谁/什么模型…）——模型自身即可回答，无需联网。
+    private static readonly System.Text.RegularExpressions.Regex SelfIdentityPattern = new(
+        "我是谁|你是谁|你是哪个模型|什么模型|哪家公司|谁开发|谁训练|谁制造|谁做的|你是机器人|你是人吗|你叫什么|你的名字|你是谁啊|who am i|who are you|what model|your name",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // 网址识别：http(s) 显式链接，或常见顶级域的裸域名（如 au.fanchuanovo.cn）。
+    // 顶级域白名单避免把 config.json / 1.2.3 之类误判为网址。
+    private static readonly System.Text.RegularExpressions.Regex UrlPattern = new(
+        @"https?://[^\s<>""'（()）【】\[\]{}]+"
+        + @"|(?<![a-zA-Z0-9_@.\-/])[a-zA-Z0-9][a-zA-Z0-9-]*(?:\.[a-zA-Z0-9-]+)+\.(?:com|cn|net|org|io|dev|cc|me|xyz|top|vip|site|online|tech|store|app|ai|gov|edu|info|club|fun|wiki|tv|co|asia|cloud|pro|biz|ltd|shop|icu)(?::\d+)?(?:/[^\s<>""'（）()【】\[\]{}]*)?",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private const string WebSearchPlannerSystemPrompt =
+        "你是联网搜索规划器。判断为了高质量回答【用户最新消息】，是否需要联网获取真实网页资料。\n" +
+        "需要时输出一行：YES|搜索词 —— 搜索词从消息里提取关键实体（游戏名/事物名/问题核心词，可含\"最新\"\"版本\"\"年份\"等时效词），去掉\"请问/帮我/告诉我/是什么\"等虚词和问号，10~20 个字。\n" +
+        "不需要时只输出 NO。不需要的情况：问候与闲聊；询问 AI 自身身份/能力；对话上文已能回答的追问；翻译、写作、数学、代码；关于本服务器/面板自身的操作问题；模糊到无法形成有效搜索词。\n" +
+        "只输出 YES|搜索词 或 NO，不要输出任何其他内容。";
+
+    /// <summary>
+    ///     Turbo-640 联网改造：让 AI"真会看网页，自主获取/理解信息"。
+    ///     1) 消息里带网址 → 直接抓取网页正文（最多 2 个）；
+    ///     2) 其余交给同端点规划器小调用：是否需要搜索 + 生成高质量搜索词，
+    ///        再抓取 cn.bing.com 结果（修复原"原话当搜索词"导致的词典/外语垃圾结果）；
+    ///     3) 纯问候/短消息身份问题不联网；任何失败一律按"不联网"降级。
+    ///     返回注入系统提示的资料文本；无联网内容时返回 null。
+    /// </summary>
+    private async Task<string?> BuildWebKnowledgeAsync(AiEndpoint endpoint, List<AiChatMessage> messages, List<object>? sourcesOut)
+    {
+        var lastUser = (messages.LastOrDefault(m => m.Role == "user")?.Content ?? "").Trim();
+        if (lastUser.Length == 0)
+        {
+            return null;
+        }
+
+        // 纯问候/身份类：连规划调用都省了
+        if (GreetingOnlyPattern.IsMatch(lastUser))
+        {
+            return null;
+        }
+
+        if (lastUser.Length <= 20 && SelfIdentityPattern.IsMatch(lastUser))
+        {
+            return null;
+        }
+
+        // 1) 消息里带网址：直接访问网页
+        var pages = await TryFetchUrlPagesAsync(lastUser, sourcesOut);
+        if (!string.IsNullOrEmpty(pages))
+        {
+            return pages;
+        }
+
+        // 2) 规划器：要不要搜 + 搜什么
+        var (need, query) = await TryPlanWebSearchAsync(endpoint, messages);
+        if (!need)
+        {
+            _logger.LogDebug("[AI] Web search skipped by planner.");
+            return null;
+        }
+
+        return await BingSearchAsync(string.IsNullOrWhiteSpace(query) ? lastUser : query, sourcesOut);
+    }
+
+    /// <summary>
+    ///     同端点极小调用（max_tokens=32、temperature=0）：判断是否需要联网
+    ///     搜索，需要时同时产出搜索词。失败/无法解析一律按"不搜索"降级。
+    /// </summary>
+    private async Task<(bool Need, string? Query)> TryPlanWebSearchAsync(AiEndpoint endpoint, List<AiChatMessage> messages)
+    {
+        try
+        {
+            var transcript = string.Join("\n", messages.TakeLast(6).Select(m =>
+                (m.Role == "user" ? "用户" : "AI") + ": " + Truncate(m.Content ?? "", 200)));
+            var ask = new List<AiChatMessage>
+            {
+                new() { Role = "user", Content = "对话记录：\n" + transcript + "\n\n判断【用户最新消息】是否需要联网搜索；需要则按格式给出搜索词。" },
+            };
+            var answer = endpoint.Format == "claude"
+                ? await TryClaudeAsync(endpoint, endpoint.Model, ask, WebSearchPlannerSystemPrompt)
+                : await TryOpenAiAsync(endpoint, endpoint.Model, ask, WebSearchPlannerSystemPrompt, webSearch: false, useTools: false, maxTokens: 32, temperature: 0);
+            if (string.IsNullOrWhiteSpace(answer))
+            {
+                _logger.LogDebug("[AI] Search planner returned empty; skipping web search.");
+                return (false, null);
+            }
+
+            var line = answer.Trim().Split('\n')[0].Trim();
+            if (line.StartsWith("YES", StringComparison.OrdinalIgnoreCase))
+            {
+                var query = line[3..].TrimStart('|', '｜', '：', ':', '-', '—', ' ', '\t').Trim('「', '」', '"', '“', '”', ' ', '\t');
+                if (query.Length > 40)
+                {
+                    query = query[..40].Trim();
+                }
+
+                return (true, string.IsNullOrWhiteSpace(query) ? null : query);
+            }
+
+            return (false, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[AI] Search planner failed; skipping web search.");
+            return (false, null);
+        }
+    }
+
+    /// <summary>
+    ///     从用户消息里提取网址（显式 http(s) 链接或常见顶级域裸域名），
+    ///     真实抓取网页正文注入提示——这是"访问 au.fanchuanovo.cn"类问题的
+    ///     正解：AI 不是"知道"网页，而是刚刚真的去读了。
+    /// </summary>
+    private async Task<string?> TryFetchUrlPagesAsync(string message, List<object>? sourcesOut)
+    {
+        var matches = UrlPattern.Matches(message);
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        var urls = new List<string>();
+        foreach (System.Text.RegularExpressions.Match m in matches)
+        {
+            var url = m.Value.Trim().TrimEnd('.', ',', '，', '。', '；', ';', '！', '?', '？', ')', '）', ']', '】', '"', '\'', '>', '：', ':');
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                url = "https://" + url;
+            }
+
+            if (urls.Count >= 2)
+            {
+                break;
+            }
+
+            if (Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+                && uri.Host.Contains('.')
+                && !urls.Any(u => string.Equals(u, uri.ToString(), StringComparison.OrdinalIgnoreCase)))
+            {
+                urls.Add(uri.ToString());
+            }
+        }
+
+        if (urls.Count == 0)
+        {
+            return null;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        var n = 0;
+        foreach (var url in urls)
+        {
+            var (title, content) = await FetchPageTextAsync(url);
+            if (content.Length == 0)
+            {
+                continue;
+            }
+
+            n++;
+            sb.Append("\n【网页").Append(n).Append("】").Append(url);
+            if (title.Length > 0)
+            {
+                sb.Append("（").Append(Truncate(title, 60)).Append('）');
+            }
+
+            sb.Append('\n').Append(content);
+            sourcesOut?.Add(new { title = Truncate(title.Length > 0 ? title : url, 60), url });
+        }
+
+        if (n == 0)
+        {
+            _logger.LogWarning("[AI] URL fetch produced no readable content for {Count} url(s).", urls.Count);
+            return null;
+        }
+
+        return "【已访问网页正文】（以下为刚刚真实抓取的网页内容，供回答参考）" + sb.ToString();
+    }
+
+    /// <summary>
+    ///     抓取单个网页并抽取可读正文。10 秒超时、512KB 上限、只处理
+    ///     文本类内容（text/*、json、xml）；失败返回空串（调用方降级）。
+    /// </summary>
+    private async Task<(string Title, string Content)> FetchPageTextAsync(string url)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+            request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5");
+            request.Headers.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,en;q=0.6");
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var response = await Http.SendAsync(request, cts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[AI] Page fetch HTTP {Status} for {Url}", (int)response.StatusCode, Truncate(url, 80));
+                return ("", "");
+            }
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+            if (contentType.Length > 0
+                && !contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+                && !contentType.Contains("json", StringComparison.OrdinalIgnoreCase)
+                && !contentType.Contains("xml", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("[AI] Page fetch skipped non-text content ({Type}) for {Url}", contentType, Truncate(url, 80));
+                return ("", "");
+            }
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(cts.Token);
+            if (bytes.Length > 512 * 1024)
+            {
+                Array.Resize(ref bytes, 512 * 1024);
+            }
+
+            var html = DecodeHtmlBytes(bytes, response.Content.Headers.ContentType?.CharSet);
+            var titleMatch = System.Text.RegularExpressions.Regex.Match(
+                html, "<title[^>]*>\\s*(.*?)\\s*</title>",
+                System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var title = StripHtml(titleMatch.Success ? titleMatch.Groups[1].Value : "");
+            var text = HtmlToText(html);
+            if (text.Length > 2000)
+            {
+                text = text[..2000] + "…";
+            }
+
+            return (title, text);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[AI] Page fetch failed for {Url}", Truncate(url, 80));
+            return ("", "");
+        }
+    }
+
+    /// <summary>按响应字符集解码，UTF-8 严格解码失败时按 GB18030 兜底（中文站常见）。</summary>
+    private static string DecodeHtmlBytes(byte[] bytes, string? charset)
+    {
+        try
+        {
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        }
+        catch
+        {
+            // 注册失败则只用 UTF-8 / 内置编码
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(charset))
+            {
+                var cs = charset.Trim('"').ToLowerInvariant();
+                if (cs.Contains("gb") || cs.Contains("936"))
+                {
+                    return System.Text.Encoding.GetEncoding("GB18030").GetString(bytes);
+                }
+
+                if (cs.Contains("big5"))
+                {
+                    return System.Text.Encoding.GetEncoding("big5").GetString(bytes);
+                }
+            }
+        }
+        catch
+        {
+            // 编码不可用时落到 UTF-8 探测
+        }
+
+        try
+        {
+            return new System.Text.UTF8Encoding(false, true).GetString(bytes);
+        }
+        catch
+        {
+            try
+            {
+                return System.Text.Encoding.GetEncoding("GB18030").GetString(bytes);
+            }
+            catch
+            {
+                return System.Text.Encoding.UTF8.GetString(bytes);
+            }
+        }
+    }
+
+    /// <summary>HTML → 可读正文：去 script/style/注释，块级标签转换行，解码实体，压缩空白。</summary>
+    private static string HtmlToText(string html)
+    {
+        html = System.Text.RegularExpressions.Regex.Replace(html, "<(script|style)\\b[^>]*>.*?</\\1>", " ",
+            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        html = System.Text.RegularExpressions.Regex.Replace(html, "<!--.*?-->", " ",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        html = System.Text.RegularExpressions.Regex.Replace(html, "<br\\s*/?>", "\n",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        html = System.Text.RegularExpressions.Regex.Replace(html, "</(p|div|li|tr|h[1-6]|section|article|table|ul|ol)>", "\n",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        html = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ");
+        html = System.Net.WebUtility.HtmlDecode(html);
+        var lines = html.Split('\n').Select(l => System.Text.RegularExpressions.Regex.Replace(l, "\\s+", " ").Trim())
+            .Where(l => l.Length > 0);
+        return string.Join("\n", lines);
+    }
 
     /// <summary>
     ///     Scrapes cn.bing.com web results (top 5) for the given query.
@@ -619,6 +926,9 @@ public class AiService
             using var request = new HttpRequestMessage(HttpMethod.Get,
                 "https://cn.bing.com/search?q=" + Uri.EscapeDataString(query) + "&count=5&setlang=zh-CN&mkt=zh-CN");
             request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+            // 不带语言头时 bing 可能返回错误语言的页面（实测出过德语结果）
+            request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml,*/*;q=0.5");
+            request.Headers.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,en;q=0.6");
             using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(6));
             using var response = await Http.SendAsync(request, cts.Token);
             if (!response.IsSuccessStatusCode)
@@ -679,7 +989,8 @@ public class AiService
     private static string StripHtml(string s)
     {
         s = System.Text.RegularExpressions.Regex.Replace(s, "<[^>]+>", "");
-        return s.Replace("&quot;", "\"").Replace("&amp;", "&").Replace("&lt;", "<").Replace("&gt;", ">").Replace("&#39;", "'").Replace("&nbsp;", " ").Trim();
+        // WebUtility.HtmlDecode 覆盖全部实体（含 &#228; 数字实体）
+        return System.Net.WebUtility.HtmlDecode(s).Trim();
     }
 
     /// <summary>
@@ -714,15 +1025,21 @@ public class AiService
             _logger.LogWarning("[AI] No API key configured; AI chat disabled. Set a key in panel AI settings, config.json (WebAdmin:AiApiKey) or FMPOSTOR_AI_API_KEY.");
             return "⚠️ AI 尚未配置：请服主在面板「AI 设置」填写 API Key（或设置服务器环境变量 FMPOSTOR_AI_API_KEY），配置后即可使用。";
         }
-        // 联网搜索统一走 cn.bing.com：抓取结果注入系统提示（内置端点的
-        // 智谱 web_search 工具实测不生效，已弃用）。收集来源供面板展示。
+        // 联网（Turbo-640 重做）：开关打开时按需联网——
+        // 1) 消息里带网址 → 直接抓取该网页正文；2) 其余由同端点规划器小调用
+        // 判断是否需要搜索并生成高质量搜索词，再抓 cn.bing.com。
+        // 资料注入系统提示并附使用规范，杜绝"我无法联网"式回答。
+        // 开关关闭时完全不联网。来源收集进 sourcesOut 供面板展示。
         if (webSearch && endpoint.Format != "claude")
         {
-            var lastUser = messages.LastOrDefault(m => m.Role == "user")?.Content;
-            var bing = await BingSearchAsync(lastUser, sourcesOut);
-            if (!string.IsNullOrEmpty(bing))
+            var knowledge = await BuildWebKnowledgeAsync(endpoint, messages, sourcesOut);
+            if (!string.IsNullOrEmpty(knowledge))
             {
-                systemPrompt += "\n\n" + bing;
+                systemPrompt += "\n\n" + knowledge
+                    + "\n\n【联网使用规范】上面是你刚刚通过内置联网工具真实抓取到的网页/搜索资料。"
+                    + "回答时优先依据这些资料，涉及网络信息时注明来自网络；"
+                    + "绝不要声称\"无法联网\"或\"没有最新信息\"——你刚刚已经联网了。"
+                    + "若资料仍不足以回答，请如实说明缺少哪方面信息。";
             }
         }
         var configuredModel = endpoint.Model;
@@ -825,7 +1142,7 @@ public class AiService
     ///     OpenAI ...): POST {baseUrl}/chat/completions with Bearer auth,
     ///     response choices[0].message.content.
     /// </summary>
-    private async Task<string?> TryOpenAiAsync(AiEndpoint endpoint, string model, List<AiChatMessage> messages, string systemPrompt, bool webSearch, bool useTools)
+    private async Task<string?> TryOpenAiAsync(AiEndpoint endpoint, string model, List<AiChatMessage> messages, string systemPrompt, bool webSearch, bool useTools, int maxTokens = 512, double temperature = 0.6)
     {
         var payload = new Dictionary<string, object?>
         {
@@ -834,8 +1151,8 @@ public class AiService
             {
                 new() { Role = "system", Content = systemPrompt },
             },
-            ["max_tokens"] = 512,
-            ["temperature"] = 0.6,
+            ["max_tokens"] = maxTokens,
+            ["temperature"] = temperature,
         };
 
         ((List<AiChatMessage>)payload["messages"]!).AddRange(messages);

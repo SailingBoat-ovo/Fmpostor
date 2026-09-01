@@ -1,0 +1,74 @@
+══════════════════════════════════════════════════════════════
+ Fmpostor Turbo-640.0-20260901 更新日志
+ （上一版本：Turbo-630.0-20260829）
+══════════════════════════════════════════════════════════════
+
+【 版本号 】
+· 全局版本号 Turbo-630 → Turbo-640.0-20260901：
+  - 自动更新服务（UpdateService.CurrentVersion）
+  - 浏览器直访服务端根路径的欢迎页（http://IP:22023/）
+  - 面板登录页标语与 CSP 注释、app.js 文件头
+  - 面板静态资源版本参数 ?v= 全部更新为 6400902
+  - i18n-extra3 登录标语键 Turbo-620 → Turbo-640
+    （同时修复繁体中文/英文翻译与简体原文失配导致的翻译失效）
+
+【 AI 联网重做：按需联网，真会看网页 】
+· 修复"不论什么问题都搜索"（问"我是谁"也去搜百度百科）：
+  联网开关打开时按三级策略判断——
+  1) 纯问候/礼貌用语、短消息身份问题（我是谁/你是谁/什么模型等）→ 不联网；
+  2) 消息中带网址（http(s) 链接或 au.fanchuanovo.cn 这类常见顶级域裸域名）
+     → AI 直接抓取该网页正文（最多 2 个/条；10 秒超时；512KB 上限；
+     UTF-8/GBK 自适应解码；HTML 转纯文本后注入，最多 2000 字/页）；
+  3) 其余问题由同端点模型的小调用（max_tokens=32、temperature=0）规划：
+     判断是否需要联网，需要时同时生成高质量搜索词（提取关键实体、
+     去掉问句虚词，10~20 字），再用该搜索词检索 cn.bing.com。
+· 修复搜索结果质量问题：
+  - 旧版直接拿用户原话当搜索词，会搜出词典/外语垃圾结果；
+    现由规划器产出正经搜索词。
+  - cn.bing.com 请求补 Accept-Language/Accept 头（修复返回德语页面）。
+  - HTML 实体解码改用 WebUtility.HtmlDecode（修复 &#228; 这类数字实体）。
+· 修复 AI"不认账"：资料注入系统提示并附【联网使用规范】，明确告知
+  AI"你刚刚已经联网了"，杜绝"我无法访问外部网站"式回答。
+· 安全降级：规划/搜索/抓网页任何一步失败，一律按"不联网"正常回答，
+  不影响聊天本身；联网开关关闭时完全不联网。
+· 面板回复下"🌐 本次联网访问的网页"来源列表现在包含：
+  搜索引擎结果页链接 + 直接抓取的网页。
+· 适用范围：面板 AI / 游戏内 /aichat / 定时 AI 任务统一生效。
+
+【 QQ 群命令接收修复（#在线状态 等命令此前完全失灵） 】
+· 根因一：RoomMonitorService.Start() 从未被任何代码调用，接收循环
+  根本没运行。/m、面板广播不受影响（发送是直接 HTTP 调用）。
+  → 已在 Program.cs 中随 ScheduleService.Start() 一并调用。
+· 根因二：http:// 地址被强转 ws:// 去连正向 WebSocket，NapCat 的
+  HTTP API 端口握手必然失败。
+  → 现按 OneBot 地址前缀自动选择接收模式：
+    ws:// / wss://     → 正向 WebSocket（原逻辑不变）
+    http:// / https:// → HTTP 轮询 get_group_msg_history
+    （每 3 秒一轮/群，NapCat/go-cqhttp/Lagrange 均实现；与 /m 发送
+    同一条 HTTP 通道，无需开启 NapCat 的"启用Ws"；按 message_id
+    水位去重，每组首轮只记录水位不执行历史命令，重启不重放；
+    连续失败 5 次输出配置提示日志）
+· 命令分发抽成 HandleGroupCommandAsync，WS/轮询两条路径共用
+  （#帮助 / #在线状态 / #订阅 / #退订）。
+· ★ 升级注意：Program.cs 已移除 RoomMonitorService 的 DI IEventListener
+  注册（EventManager 会同时枚举 DI 与手动注册的监听器，两者并存会导致
+  事件触发两次 → /m 双重推送）。现在由 Start() 独占注册（与
+  PlayerTimeService 相同模式）。请整包替换程序文件，勿只补 Start() 调用。
+
+【 面板 】
+· 登录页标语："连接到你的帆船服务器 · Turbo-640"。
+· AI 设置"联网搜索"提示更新为按需联网说明（开启=按需搜索并自动
+  访问消息中的网址；关闭=永不联网）。
+· 服务器选项"QQ 群房间广播"提示说明两种接收模式（ws:// 正向 WS /
+  http:// HTTP 轮询），地址占位符示例补充 ws:// 形式。
+
+【 部署与发布 】
+· win\ 与 linux\ 全量更新（Fmpostor.Server.exe + Impostor.Server.exe
+  旧启动脚本兼容副本双名部署；linux 上传后记得 chmod +x）。
+· panel\ 四件套全量更新（index.html + js + css + proxy.php）。
+· 开源仓库 SailingBoat-ovo/Fmpostor 已提交推送；API文档.txt 已同步更新。
+· 老服务器自动更新到 640：需创建 GitHub Release tag "Turbo-640.0"，
+  上传 Fmpostor.Server-win-x64.zip / Fmpostor.Server-linux-x64.tar.gz
+  （资产内含程序文件与 panel，不含 config.json / webadmin_*.json）。
+
+—— 2026-09-01 21:30

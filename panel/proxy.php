@@ -4,7 +4,8 @@
  * PHP 8.0+（使用 str_starts_with；如需 PHP 7 请自行加 polyfill）
  *
  * 安全说明（Turbo-620 加固）：
- * - 仅允许代理到下方白名单中的服务器地址，目标路径强制规整化后必须落在 /webadmin 下；
+ * - 可代理到任意服务器地址（面板支持连接任何 Fmpostor 服务器），目标路径强制规整化后
+ *   必须落在 /webadmin 下；
  *   URL 由 parse_url 拆解重建，配合 CURLOPT_PATH_AS_IS 禁止 libcurl 静默规整化
  *   /../ 跳出路径约束（旧版可被 dot-segment 绕过）。
  * - TLS 证书校验默认开启（CURLOPT_SSL_VERIFYPEER）；自签证书请改用 $ALLOW_INSECURE_TLS
@@ -19,12 +20,6 @@
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-// ===== 目标白名单（部署时按需修改：主机:端口）=====
-$ALLOWED_HOSTS = [
-    '127.0.0.1:22023',
-    'localhost:22023',
-    'backend.playerinfo.impwm.fcaugame.cn:58080',
-];
 // 自签证书环境置 true 才会跳过 TLS 校验（默认必须校验）。
 $ALLOW_INSECURE_TLS = false;
 
@@ -58,10 +53,6 @@ $path = $parts['path'] ?? '';
 if (!in_array($scheme, ['http', 'https'], true) || $hostPort === '' || $path === '') {
     http_response_code(403);
     die(json_encode(['success' => false, 'message' => 'Forbidden: invalid target URL.']));
-}
-if (!in_array($hostPort, $ALLOWED_HOSTS, true)) {
-    http_response_code(403);
-    die(json_encode(['success' => false, 'message' => 'Forbidden: target host is not in the allowed list.']));
 }
 
 // 规整化路径（去除 /./ 与 /../ 段），并强制要求落在 /webadmin 下。

@@ -252,7 +252,21 @@ public class RoomMonitorService : IEventListener, IDisposable
         {
             try
             {
-                await ConnectAndListenAsync(cancellation);
+                // Turbo-620 修订：ws:// / wss:// 走正向 WebSocket 接收；
+                // http:// / https:// 走 HTTP 轮询接收（get_group_msg_history），
+                // 与 /m 的发送通道一致，不再依赖 NapCat 的"启用Ws"选项。
+                // 注意：接收循环必须由 Program.cs 调用 Start() 才会运行
+                // （此前 Start() 从未被调用，群命令永远收不到）。
+                var url = GetSettings().OneBotUrl ?? "";
+                if (url.StartsWith("ws://", StringComparison.OrdinalIgnoreCase) ||
+                    url.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+                {
+                    await ConnectAndListenAsync(cancellation);
+                }
+                else
+                {
+                    await HttpPollLoopAsync(cancellation);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -359,62 +373,320 @@ public class RoomMonitorService : IEventListener, IDisposable
                 return;
             }
 
-            string messageText = rawMsg ?? "";
-            if (root.TryGetProperty("message", out var msg))
-            {
-                if (msg.ValueKind == JsonValueKind.String)
-                {
-                    messageText = msg.GetString() ?? "";
-                }
-                else if (msg.ValueKind == JsonValueKind.Array)
-                {
-                    var sb = new StringBuilder();
-                    foreach (var segment in msg.EnumerateArray())
-                    {
-                        if (segment.TryGetProperty("type", out var type) && type.GetString() == "text"
-                            && segment.TryGetProperty("data", out var data) && data.TryGetProperty("text", out var text))
-                        {
-                            sb.Append(text.GetString());
-                        }
-                    }
-
-                    messageText = sb.ToString();
-                }
-            }
-
-            messageText = messageText.Trim();
+            var messageText = ExtractMessageText(root, rawMsg);
             var userId = root.TryGetProperty("user_id", out var ui) ? ui.GetInt64() : 0L;
-
-            if (messageText is "#帮助" or "#help")
-            {
-                await SendGroupMessageAsync(settings, groupId, QqHelpText);
-                return;
-            }
-
-            if (messageText == "#在线状态")
-            {
-                _logger.LogInformation("[RoomMonitor] Received #在线状态 from group {GroupId} user {Qq}.", groupId, userId);
-                var reply = BuildRoomStatusMessage(settings.ServerName, _gameManager.Games);
-                await SendGroupMessageAsync(settings, groupId, reply);
-                _adminStats.RecordBroadcast("qq", userId, groupId, "", "", "#在线状态");
-                return;
-            }
-
-            if (messageText.StartsWith("#订阅", StringComparison.Ordinal))
-            {
-                await HandleSubscribeAsync(settings, groupId, userId, messageText["#订阅".Length..].Trim());
-                return;
-            }
-
-            if (messageText.StartsWith("#退订", StringComparison.Ordinal))
-            {
-                await HandleUnsubscribeAsync(settings, groupId, userId, messageText["#退订".Length..].Trim());
-                return;
-            }
+            await HandleGroupCommandAsync(settings, groupId, userId, messageText);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[RoomMonitor] Failed to process WebSocket message.");
+        }
+    }
+
+    /// <summary>
+    ///     Extracts plain text from a OneBot message object: raw_message,
+    ///     or the message field as string / segment array (text segments only).
+    ///     Works for both WebSocket event objects and polled history entries.
+    /// </summary>
+    private static string ExtractMessageText(JsonElement root, string? rawMsg)
+    {
+        var messageText = rawMsg ?? "";
+        if (root.TryGetProperty("message", out var msg))
+        {
+            if (msg.ValueKind == JsonValueKind.String)
+            {
+                messageText = msg.GetString() ?? "";
+            }
+            else if (msg.ValueKind == JsonValueKind.Array)
+            {
+                var sb = new StringBuilder();
+                foreach (var segment in msg.EnumerateArray())
+                {
+                    if (segment.TryGetProperty("type", out var type) && type.GetString() == "text"
+                        && segment.TryGetProperty("data", out var data) && data.TryGetProperty("text", out var text))
+                    {
+                        sb.Append(text.GetString());
+                    }
+                }
+
+                messageText = sb.ToString();
+            }
+        }
+
+        return messageText.Trim();
+    }
+
+    /// <summary>
+    ///     Shared command dispatch for group messages, used by both the
+    ///     WebSocket receive path and the HTTP polling receive path.
+    /// </summary>
+    private async Task HandleGroupCommandAsync(RoomMonitorSettings settings, long groupId, long userId, string messageText)
+    {
+        messageText = (messageText ?? "").Trim();
+        if (messageText.Length == 0)
+        {
+            return;
+        }
+
+        if (messageText is "#帮助" or "#help")
+        {
+            await SendGroupMessageAsync(settings, groupId, QqHelpText);
+            return;
+        }
+
+        if (messageText == "#在线状态")
+        {
+            _logger.LogInformation("[RoomMonitor] Received #在线状态 from group {GroupId} user {Qq}.", groupId, userId);
+            var reply = BuildRoomStatusMessage(settings.ServerName, _gameManager.Games);
+            await SendGroupMessageAsync(settings, groupId, reply);
+            _adminStats.RecordBroadcast("qq", userId, groupId, "", "", "#在线状态");
+            return;
+        }
+
+        if (messageText.StartsWith("#订阅", StringComparison.Ordinal))
+        {
+            await HandleSubscribeAsync(settings, groupId, userId, messageText["#订阅".Length..].Trim());
+            return;
+        }
+
+        if (messageText.StartsWith("#退订", StringComparison.Ordinal))
+        {
+            await HandleUnsubscribeAsync(settings, groupId, userId, messageText["#退订".Length..].Trim());
+            return;
+        }
+    }
+
+    // ========== HTTP 轮询接收（Turbo-620 修订） ==========
+
+    private sealed record PolledGroupMessage(long MessageId, long UserId, string Text);
+
+    /// <summary>
+    ///     HTTP 接收模式：不依赖 WebSocket，直接轮询 OneBot HTTP API
+    ///     get_group_msg_history（NapCat / go-cqhttp / Lagrange 等均实现）。
+    ///     与发送（/m、广播）共用同一条 HTTP 通道——只要 /m 能发出去，
+    ///     #在线状态 等群命令就能被检测到。每 3 秒一轮，按 message_id
+    ///     去重；每组首轮只记录水位不执行命令（避免重启后重放历史）。
+    /// </summary>
+    private async Task HttpPollLoopAsync(CancellationToken cancellation)
+    {
+        var settings = GetSettings();
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.OneBotUrl))
+        {
+            // 与 WS 分支一致：未启用时空转后回到 RunLoop 重新判断。
+            if (!await SleepAsync(cancellation))
+            {
+                return;
+            }
+
+            return;
+        }
+
+        _logger.LogInformation("[RoomMonitor] HTTP polling mode: receiving group messages via get_group_msg_history on {Url} (3s interval).", settings.OneBotUrl);
+
+        var lastIds = new Dictionary<long, long>();
+        var initialized = new HashSet<long>();
+        var consecutiveFailures = 0;
+
+        while (!cancellation.IsCancellationRequested)
+        {
+            settings = GetSettings();
+            if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.OneBotUrl))
+            {
+                return; // 回到 RunLoop 重新选择接收模式
+            }
+
+            var groups = settings.AllowedGroups ?? new List<long>();
+            if (groups.Count == 0)
+            {
+                if (!await SleepAsync(cancellation, 5000))
+                {
+                    return;
+                }
+
+                continue;
+            }
+
+            var failed = false;
+            foreach (var groupId in groups)
+            {
+                if (cancellation.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var msgs = await FetchGroupHistoryAsync(settings, groupId, cancellation);
+                    if (msgs == null)
+                    {
+                        failed = true;
+                        continue;
+                    }
+
+                    if (!initialized.Contains(groupId))
+                    {
+                        // 首轮：只推进水位，不执行历史消息里的命令
+                        initialized.Add(groupId);
+                        lastIds[groupId] = msgs.Count > 0 ? msgs[^1].MessageId : 0;
+                        continue;
+                    }
+
+                    var last = lastIds.TryGetValue(groupId, out var l) ? l : 0;
+                    foreach (var m in msgs)
+                    {
+                        if (m.MessageId <= last)
+                        {
+                            continue;
+                        }
+
+                        lastIds[groupId] = m.MessageId;
+                        await HandleGroupCommandAsync(settings, groupId, m.UserId, m.Text);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    failed = true;
+                    _logger.LogWarning(ex, "[RoomMonitor] Poll failed for group {GroupId}.", groupId);
+                }
+            }
+
+            consecutiveFailures = failed ? consecutiveFailures + 1 : 0;
+            if (consecutiveFailures == 5)
+            {
+                _logger.LogWarning(
+                    "[RoomMonitor] HTTP polling keeps failing on {Url}. 请确认该地址是 NapCat 的 HTTP 服务器地址（/m 能发送即 HTTP 可用）；若想用正向 WebSocket 接收，请把地址改成 ws:// 开头。",
+                    settings.OneBotUrl);
+            }
+
+            if (!await SleepAsync(cancellation, 3000))
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Calls OneBot get_group_msg_history for one group. Returns the
+    ///     messages sorted by message_id ascending, or null when the call
+    ///     failed (caller counts it as a failed round).
+    /// </summary>
+    private async Task<List<PolledGroupMessage>?> FetchGroupHistoryAsync(RoomMonitorSettings settings, long groupId, CancellationToken cancellation)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(6);
+
+            var url = settings.OneBotUrl.TrimEnd('/') + "/get_group_msg_history";
+            var payload = new { group_id = groupId, count = 20 };
+            var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+            HttpResponseMessage response;
+            if (!string.IsNullOrWhiteSpace(settings.OneBotToken))
+            {
+                // Token via header, same as send_group_msg (keeps it out of access logs).
+                using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+                req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + settings.OneBotToken);
+                response = await client.SendAsync(req, cancellation);
+            }
+            else
+            {
+                response = await client.PostAsync(url, content, cancellation);
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellation);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[RoomMonitor] get_group_msg_history failed [{Status}] for group {GroupId}: {Body}",
+                    response.StatusCode, groupId, body.Length > 200 ? body[..200] : body);
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("data", out var data))
+            {
+                _logger.LogWarning("[RoomMonitor] get_group_msg_history unexpected response for group {GroupId}.", groupId);
+                return null;
+            }
+
+            JsonElement arr;
+            if (data.ValueKind == JsonValueKind.Array)
+            {
+                arr = data;
+            }
+            else if (data.ValueKind == JsonValueKind.Object && data.TryGetProperty("messages", out var ms) && ms.ValueKind == JsonValueKind.Array)
+            {
+                arr = ms;
+            }
+            else
+            {
+                return new List<PolledGroupMessage>();
+            }
+
+            var list = new List<PolledGroupMessage>();
+            foreach (var item in arr.EnumerateArray())
+            {
+                var mid = GetLongLenient(item, "message_id");
+                if (mid <= 0)
+                {
+                    continue;
+                }
+
+                var userId = GetLongLenient(item, "user_id");
+                var text = ExtractMessageText(item, item.TryGetProperty("raw_message", out var rm) ? rm.GetString() : null);
+                list.Add(new PolledGroupMessage(mid, userId, text));
+            }
+
+            list.Sort((a, b) => a.MessageId.CompareTo(b.MessageId));
+            return list;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RoomMonitor] get_group_msg_history request failed for group {GroupId}.", groupId);
+            return null;
+        }
+    }
+
+    private static long GetLongLenient(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var v))
+        {
+            return 0;
+        }
+
+        if (v.ValueKind == JsonValueKind.Number)
+        {
+            return v.TryGetInt64(out var n) ? n : 0;
+        }
+
+        if (v.ValueKind == JsonValueKind.String && long.TryParse(v.GetString(), out var s))
+        {
+            return s;
+        }
+
+        return 0;
+    }
+
+    /// <summary>Task.Delay that swallows cancellation; false when cancelled.</summary>
+    private static async Task<bool> SleepAsync(CancellationToken cancellation, int milliseconds = 10000)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(milliseconds), cancellation);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 
