@@ -9,7 +9,7 @@
   <!-- Turbo-640 Enterprise UI. CSP 基线：面板使用内联处理器与用户自定义服务器地址 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>帆船控制台 · Among Us 服务器管理</title>
-  <link rel="stylesheet" href="css/style.css?v=6400903">
+  <link rel="stylesheet" href="css/style.css?v=6400904">
 </head>
 <body>
 
@@ -1068,6 +1068,17 @@
     </div>
   </div>
 
+  <!-- 举报详情 -->
+  <div class="modal-overlay" id="reportDetailModal">
+    <div class="modal" style="max-width:560px;">
+      <h2>🔍 举报详情</h2>
+      <div id="reportDetailBody" style="display:flex;flex-direction:column;gap:10px;max-height:62vh;overflow-y:auto;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="closeModal('reportDetailModal')">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- AI 源码警告弹窗（登录成功后） -->
   <div id="aiWarnModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;align-items:center;justify-content:center;">
     <div style="background:var(--bg-secondary,#1a1d24);border:1px solid var(--border,#333);border-radius:14px;max-width:480px;width:92%;padding:28px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);">
@@ -1091,11 +1102,11 @@
       </div>
     </div>
   </div>
-  <script src="js/i18n.js?v=6400903"></script>
-  <script src="js/i18n-extra.js?v=6400903"></script>
-  <script src="js/i18n-extra2.js?v=6400903"></script>
-  <script src="js/i18n-extra3.js?v=6400903"></script>
-  <script src="js/i18n-extra4.js?v=6400903"></script>
-  <script src="js/app.js?v=6400903"></script>
+  <script src="js/i18n.js?v=6400904"></script>
+  <script src="js/i18n-extra.js?v=6400904"></script>
+  <script src="js/i18n-extra2.js?v=6400904"></script>
+  <script src="js/i18n-extra3.js?v=6400904"></script>
+  <script src="js/i18n-extra4.js?v=6400904"></script>
+  <script src="js/app.js?v=6400904"></script>
 </body>
 </html>

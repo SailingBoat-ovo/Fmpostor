@@ -627,6 +627,7 @@ async function loadReports() {
   const tb = $('reportsBody');
   if (!d || !d.success) { if (tb) tb.innerHTML = '<tr><td colspan="12"><div class="empty-state"><h3>无法加载举报</h3></div></td></tr>'; return; }
   const reports = d.reports || [];
+  window._reportsCache = reports;
   if (!tb) return;
   if (!reports.length) { tb.innerHTML = '<tr><td colspan="12"><div class="empty-state"><h3>暂无举报</h3></div></td></tr>'; return; }
   tb.innerHTML = reports.map(r => {
@@ -644,9 +645,42 @@ async function loadReports() {
       '<td style="max-width:280px;">' + esc(r.description) + '</td>' +
       '<td>' + st + '</td>' +
       '<td style="white-space:nowrap">' +
+        '<button class="btn btn-ghost btn-xs" onclick="showReportDetail(' + r.id + ')">详情</button> ' +
         (r.status !== 'handled' ? '<button class="btn btn-success btn-xs" onclick="setReportStatus(' + r.id + ',\'handled\')">标记处理</button> ' : '') +
         '<button class="btn btn-danger btn-xs" onclick="removeReport(' + r.id + ')">删除</button></td></tr>';
   }).join('');
+}
+
+function reportDetailField(label, value, mono) {
+  return '<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;">' +
+    '<span style="color:var(--text-muted);font-size:12px;white-space:nowrap;">' + label + '</span>' +
+    '<span style="font-size:13px;word-break:break-all;' + (mono ? 'font-family:var(--mono);' : '') + '">' + esc(value) + '</span></div>';
+}
+
+function showReportDetail(id) {
+  const r = (window._reportsCache || []).find(x => x.id === id);
+  if (!r) { toast('找不到该举报记录', 'error'); return; }
+  const st = r.status === 'handled' ? '<span class="badge badge-green">已处理</span>' : '<span class="badge badge-yellow">待处理</span>';
+  $('reportDetailBody').innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);font-family:var(--mono);">' +
+      '<span>#' + r.id + ' · ' + fmtDate(r.time) + ' · 房间 ' + esc(r.gameCode || '-') + '</span><span>' + st + '</span></div>' +
+    '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;">' +
+      '<div style="font-weight:700;font-size:13px;">👤 举报人</div>' +
+      reportDetailField('名字', r.reporterName || '-') +
+      reportDetailField('好友代码', r.reporterFriendCode || '（未记录）', true) +
+      reportDetailField('PUID', r.reporterPuid || '（未记录）', true) +
+      reportDetailField('IP', r.reporterIp || '（未记录）', true) +
+    '</div>' +
+    '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;">' +
+      '<div style="font-weight:700;font-size:13px;">🎯 被举报人</div>' +
+      reportDetailField('名字', r.reportedPlayerName || '（旧版举报未记录）') +
+      reportDetailField('好友代码', r.reportedPlayerFriendCode || '（旧版举报未记录）', true) +
+    '</div>' +
+    '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;">' +
+      '<div style="font-weight:700;font-size:13px;">📝 举报内容</div>' +
+      '<div style="font-size:13px;white-space:pre-wrap;word-break:break-word;">' + esc(r.description || '-') + '</div>' +
+    '</div>';
+  openModal('reportDetailModal');
 }
 
 async function removeReport(id) {
