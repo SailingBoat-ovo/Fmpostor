@@ -1483,7 +1483,7 @@ public class AiService
                 {
                     var reports = _reports.GetAllAsync().GetAwaiter().GetResult().Take(30).ToList();
                     return "最近举报（最多30条）：\n" + string.Join("\n", reports.Select(r =>
-                        $"#{r.Id} {r.Time:MM-dd HH:mm} 举报者{r.ReporterName}({r.ReporterFriendCode}) 房间{r.GameCode} 状态{r.Status} 描述:{r.Description}"));
+                        $"#{r.Id} {r.Time:MM-dd HH:mm} 举报者{r.ReporterName}({r.ReporterFriendCode}) 举报{r.ReportedPlayerName}({r.ReportedPlayerFriendCode}) 房间{r.GameCode} 状态{r.Status} 描述:{r.Description}"));
                 }
 
                 default:

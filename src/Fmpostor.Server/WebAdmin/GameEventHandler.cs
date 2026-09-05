@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Fmpostor.Api.Events;
@@ -37,17 +38,12 @@ public class GameEventHandler : IEventListener
     private readonly BroadcastService _broadcast;
     private readonly AdminStatsService _adminStats;
 
-    private const string ReportHelp =
-        "用法: /report <举报描述>\n" +
-        "示例: /report 玩家 xxx 使用加速器作弊\n" +
-        "举报后管理员会在管理面板看到你的举报，感谢反馈！";
-
     // Per-player limiter for /aichat (5 requests / minute).
     private static readonly FixedWindowRateLimiter _aiChatLimiter = new(5, TimeSpan.FromMinutes(1));
 
     private const string HelpText =
         "帆船服务端可用命令：\n" +
-        "/report <描述> - 举报违规玩家\n" +
+        "/report - 举报违规玩家（交互式选择被举报人）\n" +
         "/kick <玩家名> - 房主踢出玩家\n" +
         "/ban <玩家名> - 房主封禁玩家\n" +
         "/aichat <内容> - 与 AI 助手聊天（需管理员开启）\n" +
@@ -59,6 +55,25 @@ public class GameEventHandler : IEventListener
         "/m - 房主推送房间报告到全部启用的QQ群\n" +
         "/m <内容> - 推送房间报告并在本房间下附一次性备注（下次发送不保留）\n" +
         "/help - 显示本帮助";
+
+    // ========== 交互式举报会话（Turbo-640 重做，替代旧 /report <描述> 一段式） ==========
+    //
+    // 流程：/report → 私聊收到本房间玩家列表（每页 5 人，全局编号）→
+    // 输入编号选择被举报人 → 显示其 ID/名字/好友代码 → 输入 0 确认（1 退出）→
+    // 直接输入举报内容（无需前缀）→ 提交成功。翻页：上一页 / 下一页；退出：退出举报。
+    private const int ReportPageSize = 5;
+    private static readonly TimeSpan ReportSessionTimeout = TimeSpan.FromMinutes(10);
+
+    private sealed class ReportSession
+    {
+        public IGame Game { get; set; } = null!;
+        public int Page { get; set; }
+        public IClientPlayer? Selected { get; set; }
+        public bool Confirmed { get; set; }
+        public DateTime LastActivity { get; set; } = DateTime.UtcNow;
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ReportSession> _reportSessions = new();
 
     public GameEventHandler(
         ILogger<GameEventHandler> logger,
@@ -134,6 +149,7 @@ public class GameEventHandler : IEventListener
         _logger.LogInformation("[WebAdmin] Game {Code} destroyed.", e.Game.Code);
         _playerLogs.Add("game", "", "", "", e.Game.Code.Code, "Game destroyed");
         _roomCleanup.Untrack(e.Game.Code);
+        CleanupReportSessions(e.Game.Code.Code);
     }
 
     [EventListener]
@@ -284,6 +300,13 @@ public class GameEventHandler : IEventListener
         _logger.LogInformation("[WebAdmin] Player {Name} left game {Code}.", playerName, e.Game.Code);
         _connLogger.Log("disconnect", playerName, ip ?? "?", e.Game.Code.ToString(), e.IsBan ? "Banned" : "");
         _playerLogs.Add("leave", playerName, e.Player.Client.FriendCode ?? "", e.Player.Client.Puid ?? "", e.Game.Code.Code, e.IsBan ? "Banned" : "Left");
+
+        // The leaving player's interactive report session dies with them.
+        var leftKey = e.Player.Client.FriendCode ?? e.Player.Client.Puid ?? ip ?? "";
+        if (leftKey.Length > 0)
+        {
+            _reportSessions.TryRemove(leftKey, out _);
+        }
     }
 
     // ========== Chat: filter + commands + log ==========
@@ -310,41 +333,40 @@ public class GameEventHandler : IEventListener
             return;
         }
 
-        // In-game report command.
-        if (trimmed.StartsWith("/report", StringComparison.OrdinalIgnoreCase))
+        // Interactive report flow (Turbo-640): an active session intercepts all
+        // subsequent chat input from this player until it ends.
+        if (_reportSessions.TryGetValue(playerKey, out var reportSession))
+        {
+            if (reportSession.Game.Code.Code == e.Game.Code.Code)
+            {
+                e.IsCancelled = true;
+                await HandleReportSessionInputAsync(e, reportSession, trimmed, playerName, playerKey);
+                return;
+            }
+
+            // Player switched rooms mid-flow: drop the stale session and let the
+            // message be processed as a normal chat.
+            _reportSessions.TryRemove(playerKey, out _);
+        }
+
+        // /report starts the interactive report flow.
+        if (trimmed.StartsWith("/report", StringComparison.OrdinalIgnoreCase)
+            && (trimmed.Length == "/report".Length || trimmed["/report".Length] == ' '))
         {
             e.IsCancelled = true;
-
-            var args = trimmed["/report".Length..].Trim();
-            if (string.IsNullOrEmpty(args) || args.Equals("help", StringComparison.OrdinalIgnoreCase))
+            if (trimmed.Equals("/report help", StringComparison.OrdinalIgnoreCase))
             {
                 if (e.ClientPlayer.Character != null)
                 {
-                    await e.ClientPlayer.Character.SendChatToPlayerAsync(ReportHelp, e.ClientPlayer.Character);
+                    await e.ClientPlayer.Character.SendChatToPlayerAsync(
+                        "交互式举报：输入 /report 后按提示选择被举报玩家（编号），确认后直接输入举报内容。",
+                        e.ClientPlayer.Character);
                 }
 
                 return;
             }
 
-            var description = args.Length > 200 ? args[..200] : args;
-            await _reportService.AddAsync(new ReportEntry
-            {
-                ReporterName = playerName,
-                ReporterFriendCode = e.ClientPlayer.Client.FriendCode ?? "",
-                ReporterPuid = e.ClientPlayer.Client.Puid ?? "",
-                ReporterIp = e.ClientPlayer.Client.Connection?.EndPoint?.Address?.ToString() ?? "",
-                GameCode = e.Game.Code.Code,
-                Description = description,
-            });
-
-            _playerLogs.Add("report", playerName, e.ClientPlayer.Client.FriendCode ?? "", e.ClientPlayer.Client.Puid ?? "", e.Game.Code.Code, description);
-
-            if (e.ClientPlayer.Character != null)
-            {
-                await e.ClientPlayer.Character.SendChatToPlayerAsync(
-                    "举报已提交，管理员会尽快处理。感谢反馈！", e.ClientPlayer.Character);
-            }
-
+            await StartReportSessionAsync(e, playerName, playerKey);
             return;
         }
 
@@ -584,6 +606,206 @@ public class GameEventHandler : IEventListener
         _playerLogs.Add("chat", playerName, e.ClientPlayer.Client.FriendCode ?? "", e.ClientPlayer.Client.Puid ?? "", e.Game.Code.Code, message);
         _logger.LogDebug("[WebAdmin] Chat from {Name} in {Code}: {Msg}",
             playerName, e.Game.Code, e.Message);
+    }
+
+    // ========== Interactive report session (Turbo-640) ==========
+
+    private static string ReportPlayerName(IClientPlayer p)
+    {
+        return p.Character?.PlayerInfo?.PlayerName ?? p.Client?.Name ?? "?";
+    }
+
+    private static List<IClientPlayer> GetReportablePlayers(IGame game)
+    {
+        return game.Players
+            .Where(p => p.Client != null && p.Client.Connection?.IsConnected != false)
+            .ToList();
+    }
+
+    private async Task StartReportSessionAsync(IPlayerChatEvent e, string playerName, string playerKey)
+    {
+        var players = GetReportablePlayers(e.Game);
+        if (players.Count == 0)
+        {
+            if (e.ClientPlayer.Character != null)
+            {
+                await e.ClientPlayer.Character.SendChatToPlayerAsync("当前房间没有可举报的玩家。", e.ClientPlayer.Character);
+            }
+
+            return;
+        }
+
+        var session = new ReportSession { Game = e.Game, Page = 0 };
+        _reportSessions[playerKey] = session;
+        _logger.LogInformation("[Report] Session started for {Name} ({Key}) in {Code}.", playerName, playerKey, e.Game.Code);
+        await SendReportListPageAsync(e, session, "请选择你要举报的玩家：");
+    }
+
+    private async Task SendReportListPageAsync(IPlayerChatEvent e, ReportSession session, string header)
+    {
+        var players = GetReportablePlayers(session.Game);
+        var pageCount = Math.Max(1, (int)Math.Ceiling(players.Count / (double)ReportPageSize));
+        if (session.Page >= pageCount)
+        {
+            session.Page = pageCount - 1;
+        }
+
+        if (session.Page < 0)
+        {
+            session.Page = 0;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(header);
+        sb.AppendLine("── 玩家列表 第 " + (session.Page + 1) + "/" + pageCount + " 页 ──");
+        foreach (var p in players.Skip(session.Page * ReportPageSize).Take(ReportPageSize))
+        {
+            var idx = players.IndexOf(p) + 1;
+            sb.AppendLine(idx + ". " + ReportPlayerName(p));
+        }
+
+        sb.AppendLine("输入编号选择要举报的玩家；上一页 / 下一页 翻页；退出举报 结束。");
+        if (e.ClientPlayer.Character != null)
+        {
+            await e.ClientPlayer.Character.SendChatToPlayerAsync(sb.ToString(), e.ClientPlayer.Character);
+        }
+    }
+
+    private async Task HandleReportSessionInputAsync(IPlayerChatEvent e, ReportSession session, string trimmed, string playerName, string playerKey)
+    {
+        var idle = DateTime.UtcNow - session.LastActivity;
+        session.LastActivity = DateTime.UtcNow;
+        var character = e.ClientPlayer.Character;
+
+        async Task SendAsync(string msg)
+        {
+            if (character != null)
+            {
+                await character.SendChatToPlayerAsync(msg, character);
+            }
+        }
+
+        // 过期清理：长时间无操作自动结束会话
+        if (idle >= ReportSessionTimeout)
+        {
+            _reportSessions.TryRemove(playerKey, out _);
+            await SendAsync("举报会话已超时结束，如需举报请重新输入 /report。");
+            return;
+        }
+
+        // 房间已结束/销毁：结束会话
+        if (session.Game.GameState is GameStates.Ended or GameStates.Destroyed)
+        {
+            _reportSessions.TryRemove(playerKey, out _);
+            await SendAsync("房间已结束，举报会话已退出。");
+            return;
+        }
+
+        var selected = session.Selected;
+
+        // 阶段一：选择被举报人（列表）
+        if (selected == null)
+        {
+            if (trimmed == "上一页")
+            {
+                session.Page--;
+                await SendReportListPageAsync(e, session, "请选择你要举报的玩家：");
+                return;
+            }
+
+            if (trimmed == "下一页")
+            {
+                session.Page++;
+                await SendReportListPageAsync(e, session, "请选择你要举报的玩家：");
+                return;
+            }
+
+            if (trimmed == "退出举报")
+            {
+                _reportSessions.TryRemove(playerKey, out _);
+                await SendAsync("已退出举报。");
+                return;
+            }
+
+            if (int.TryParse(trimmed, out var num))
+            {
+                var players = GetReportablePlayers(session.Game);
+                var target = num >= 1 && num <= players.Count ? players[num - 1] : null;
+                if (target == null)
+                {
+                    await SendAsync("没有编号 " + num + "，请输入当前列表中的编号。");
+                    return;
+                }
+
+                session.Selected = target;
+                var targetName = ReportPlayerName(target);
+                var targetFc = target.Client?.FriendCode ?? "";
+                await SendAsync(
+                    "您将举报：" + targetName + "（编号 " + num +
+                    (string.IsNullOrEmpty(targetFc) ? "）" : "，好友代码 " + targetFc + "）") +
+                    "\n输入 0 确认举报，输入 1 退出。");
+                return;
+            }
+
+            await SendAsync("无法识别的输入。输入列表中的编号选择玩家；上一页 / 下一页 翻页；退出举报 结束。");
+            return;
+        }
+
+        var selName = ReportPlayerName(selected);
+        var selFc = selected.Client?.FriendCode ?? "";
+
+        // 阶段二：确认（0=确认举报，1=退出）
+        if (!session.Confirmed)
+        {
+            if (trimmed == "0")
+            {
+                session.Confirmed = true;
+                await SendAsync("已选择举报 " + selName + "。请直接输入举报内容（无需任何指令前缀），发送后即提交。");
+                return;
+            }
+
+            if (trimmed == "1" || trimmed == "退出举报")
+            {
+                _reportSessions.TryRemove(playerKey, out _);
+                await SendAsync("已退出举报。");
+                return;
+            }
+
+            await SendAsync("请输入 0 确认举报 " + selName + "，或输入 1 退出。");
+            return;
+        }
+
+        // 阶段三：输入举报内容（无需前缀，发送即提交）
+        var description = trimmed.Length > 200 ? trimmed[..200] : trimmed;
+        await _reportService.AddAsync(new ReportEntry
+        {
+            ReporterName = playerName,
+            ReporterFriendCode = e.ClientPlayer.Client.FriendCode ?? "",
+            ReporterPuid = e.ClientPlayer.Client.Puid ?? "",
+            ReporterIp = e.ClientPlayer.Client.Connection?.EndPoint?.Address?.ToString() ?? "",
+            GameCode = e.Game.Code.Code,
+            Description = description,
+            ReportedPlayerName = selName,
+            ReportedPlayerFriendCode = selFc,
+            ReportedPlayerPuid = selected.Client?.Puid ?? "",
+        });
+
+        _playerLogs.Add("report", playerName, e.ClientPlayer.Client.FriendCode ?? "", e.ClientPlayer.Client.Puid ?? "", e.Game.Code.Code, "举报 " + selName + "(" + selFc + "): " + description);
+        _reportSessions.TryRemove(playerKey, out _);
+        _logger.LogInformation("[Report] Submitted by {Name} against {Target}({Fc}) in {Code}.",
+            playerName, selName, selFc, e.Game.Code);
+        await SendAsync("✅ 举报成功！管理员会在管理面板看到你的举报，感谢反馈。");
+    }
+
+    private void CleanupReportSessions(string gameCode)
+    {
+        foreach (var kv in _reportSessions)
+        {
+            if (kv.Value.Game.Code.Code == gameCode)
+            {
+                _reportSessions.TryRemove(kv.Key, out _);
+            }
+        }
     }
 
     // ========== Behavior log + stats: in-game actions ==========

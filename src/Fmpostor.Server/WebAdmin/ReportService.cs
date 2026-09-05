@@ -20,6 +20,11 @@ public class ReportEntry
     public string GameCode { get; set; } = "";
     public string Description { get; set; } = "";
     public string Status { get; set; } = "pending"; // pending | handled
+
+    // Turbo-640: 交互式举报所选定的被举报人（旧记录为空，面板显示 "-"）
+    public string ReportedPlayerName { get; set; } = "";
+    public string ReportedPlayerFriendCode { get; set; } = "";
+    public string ReportedPlayerPuid { get; set; } = "";
 }
 
 internal class ReportStore

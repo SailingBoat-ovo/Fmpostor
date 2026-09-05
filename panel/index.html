@@ -9,7 +9,7 @@
   <!-- Turbo-640 Enterprise UI. CSP 基线：面板使用内联处理器与用户自定义服务器地址 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>帆船控制台 · Among Us 服务器管理</title>
-  <link rel="stylesheet" href="css/style.css?v=6400902">
+  <link rel="stylesheet" href="css/style.css?v=6400903">
 </head>
 <body>
 
@@ -295,14 +295,14 @@
 
         <!-- ===== 举报处理 ===== -->
         <div id="tab-reports" class="tab-content">
-          <div class="page-head"><h2>举报处理</h2><div class="page-desc">玩家在游戏内使用 /report 提交的举报，在此处置</div></div>
+          <div class="page-head"><h2>举报处理</h2><div class="page-desc">玩家在游戏内使用 /report 交互式举报（选择被举报人 + 填写内容），在此处置</div></div>
           <div class="card">
             <div class="card-head"><h3>📢 玩家举报</h3></div>
             <div class="card-body" style="padding:0;">
               <div class="table-wrap" style="border:none;border-radius:0;box-shadow:none;">
                 <table>
-                  <thead><tr><th>ID</th><th>时间</th><th>举报者</th><th>好友码</th><th>PUID</th><th>IP</th><th>房间</th><th>描述</th><th>状态</th><th>操作</th></tr></thead>
-                  <tbody id="reportsBody"><tr><td colspan="10"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
+                  <thead><tr><th>ID</th><th>时间</th><th>举报者</th><th>举报者好友码</th><th>被举报人</th><th>被举报好友码</th><th>PUID</th><th>IP</th><th>房间</th><th>描述</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody id="reportsBody"><tr><td colspan="12"><div class="empty-state"><h3>加载中...</h3></div></td></tr></tbody>
                 </table>
               </div>
             </div>
@@ -1091,11 +1091,11 @@
       </div>
     </div>
   </div>
-  <script src="js/i18n.js?v=6400902"></script>
-  <script src="js/i18n-extra.js?v=6400902"></script>
-  <script src="js/i18n-extra2.js?v=6400902"></script>
-  <script src="js/i18n-extra3.js?v=6400902"></script>
-  <script src="js/i18n-extra4.js?v=6400902"></script>
-  <script src="js/app.js?v=6400902"></script>
+  <script src="js/i18n.js?v=6400903"></script>
+  <script src="js/i18n-extra.js?v=6400903"></script>
+  <script src="js/i18n-extra2.js?v=6400903"></script>
+  <script src="js/i18n-extra3.js?v=6400903"></script>
+  <script src="js/i18n-extra4.js?v=6400903"></script>
+  <script src="js/app.js?v=6400903"></script>
 </body>
 </html>

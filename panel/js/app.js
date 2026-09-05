@@ -625,10 +625,10 @@ async function changePassword() {
 async function loadReports() {
   const d = await api('GET', '/api/reports');
   const tb = $('reportsBody');
-  if (!d || !d.success) { if (tb) tb.innerHTML = '<tr><td colspan="10"><div class="empty-state"><h3>无法加载举报</h3></div></td></tr>'; return; }
+  if (!d || !d.success) { if (tb) tb.innerHTML = '<tr><td colspan="12"><div class="empty-state"><h3>无法加载举报</h3></div></td></tr>'; return; }
   const reports = d.reports || [];
   if (!tb) return;
-  if (!reports.length) { tb.innerHTML = '<tr><td colspan="10"><div class="empty-state"><h3>暂无举报</h3></div></td></tr>'; return; }
+  if (!reports.length) { tb.innerHTML = '<tr><td colspan="12"><div class="empty-state"><h3>暂无举报</h3></div></td></tr>'; return; }
   tb.innerHTML = reports.map(r => {
     const st = r.status === 'handled'
       ? '<span class="badge badge-green">已处理</span>'
@@ -636,6 +636,8 @@ async function loadReports() {
     return '<tr><td>' + r.id + '</td><td style="white-space:nowrap;font-size:12px">' + fmtDate(r.time) + '</td>' +
       '<td><strong>' + esc(r.reporterName) + '</strong></td>' +
       '<td style="font-family:monospace;font-size:12px;color:var(--text-muted)">' + esc(r.reporterFriendCode || '-') + '</td>' +
+      '<td><strong>' + esc(r.reportedPlayerName || '-') + '</strong></td>' +
+      '<td style="font-family:monospace;font-size:12px;color:var(--text-muted)">' + esc(r.reportedPlayerFriendCode || '-') + '</td>' +
       '<td style="font-family:monospace;font-size:11px;color:var(--text-muted)">' + esc(r.reporterPuid || '-') + '</td>' +
       '<td style="font-family:monospace;font-size:12px;color:var(--text-muted)">' + esc(r.reporterIp || '-') + '</td>' +
       '<td>' + esc(r.gameCode || '-') + '</td>' +
@@ -1689,11 +1691,11 @@ const AGENT_TOOLS = {
   },
   get_reports: {
     cat: 'query',
-    desc: '获取举报列表（含 id/reporterName/gameCode/description/status）',
+    desc: '获取举报列表（含 id/reporterName/reportedPlayerName/reportedPlayerFriendCode/gameCode/description/status）',
     run: async () => {
       const d = await api('GET', '/api/reports');
       if (!d || !d.success) return { ok: false, summary: '无法获取举报列表' };
-      const list = (d.reports || []).map(r => '#' + r.id + ' ' + r.reporterName + ' 房=' + (r.gameCode || '-') + ' [' + r.status + '] ' + (r.description || ''));
+      const list = (d.reports || []).map(r => '#' + r.id + ' ' + r.reporterName + ' 举报 ' + (r.reportedPlayerName || '-') + '(' + (r.reportedPlayerFriendCode || '-') + ') 房=' + (r.gameCode || '-') + ' [' + r.status + '] ' + (r.description || ''));
       return { ok: true, summary: '共 ' + list.length + ' 条举报：' + (list.join('；') || '无') };
     },
   },

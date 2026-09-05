@@ -21,7 +21,7 @@ public class BroadcastStore
     public int IntervalMinutes { get; set; } = 30;
     public List<BroadcastMessageItem> Messages { get; set; } = new()
     {
-        new BroadcastMessageItem { Text = "欢迎来到由帆船服务端驱动的服务器！请文明游戏，举报作弊请使用 /report 描述。", Enabled = true },
+        new BroadcastMessageItem { Text = "欢迎来到由帆船服务端驱动的服务器！请文明游戏，举报作弊请输入 /report 按提示选择玩家。", Enabled = true },
     };
 }
 
