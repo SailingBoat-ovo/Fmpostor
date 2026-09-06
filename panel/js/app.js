@@ -1174,9 +1174,16 @@ async function loadMonitorSettings() {
   window._monitorDefaults = {
     defaultRoomReportTemplate: d.defaultRoomReportTemplate || '',
     defaultStatusReplyTemplate: d.defaultStatusReplyTemplate || '',
+    defaultStatusTriggers: (d.defaultStatusTriggers && d.defaultStatusTriggers.length ? d.defaultStatusTriggers : ['#在线状态']).join(','),
   };
   $('monitorRoomReportTemplate').value = d.roomReportTemplate || d.defaultRoomReportTemplate || '';
   $('monitorStatusReplyTemplate').value = d.statusReplyTemplate || d.defaultStatusReplyTemplate || '';
+  $('monitorStatusTriggers').value = (d.statusTriggers && d.statusTriggers.length ? d.statusTriggers : (d.defaultStatusTriggers || ['#在线状态'])).join(',');
+}
+
+function resetStatusTriggers() {
+  $('monitorStatusTriggers').value = (window._monitorDefaults || {}).defaultStatusTriggers || '#在线状态';
+  toast('已恢复为默认状态命令，保存后生效', 'info');
 }
 
 function resetMonitorTemplate(textareaId, defaultKey) {
@@ -1187,12 +1194,14 @@ function resetMonitorTemplate(textareaId, defaultKey) {
 
 async function saveMonitorSettings() {
   const groups = $('monitorGroups').value.split(',').map(s => s.trim()).filter(s => /^\d+$/.test(s)).map(Number);
+  const triggers = $('monitorStatusTriggers').value.split(/[,，、;；]+/).map(s => s.trim()).filter(Boolean);
   const d = await api('POST', '/api/monitor', {
     enabled: $('monitorEnabled').value === 'true',
     oneBotUrl: $('monitorUrl').value.trim(),
     oneBotToken: $('monitorToken').value.trim(),
     allowedGroups: groups,
     serverName: $('monitorServerName').value.trim(),
+    statusTriggers: triggers,
     roomReportTemplate: $('monitorRoomReportTemplate').value,
     statusReplyTemplate: $('monitorStatusReplyTemplate').value,
   });
@@ -2097,7 +2106,7 @@ const AGENT_TOOLS = {
     run: async () => {
       const d = await api('GET', '/api/monitor');
       if (!d || !d.success) return { ok: false, summary: '无法获取广播设置' };
-      return { ok: true, summary: '启用=' + (d.enabled ? '是' : '否') + ' 地址=' + (d.oneBotUrl || '未设置') + ' 群=' + ((d.allowedGroups || []).join(',') || '无') + ' 模板=' + (d.roomReportTemplate || '默认') };
+      return { ok: true, summary: '启用=' + (d.enabled ? '是' : '否') + ' 地址=' + (d.oneBotUrl || '未设置') + ' 群=' + ((d.allowedGroups || []).join(',') || '无') + ' 状态命令=' + ((d.statusTriggers || []).join('/') || '默认') + ' 模板=' + (d.roomReportTemplate || '默认') };
     },
   },
   get_player_times: {
@@ -2246,7 +2255,7 @@ const AGENT_TOOLS = {
     },
   },
   update_monitor_settings: {
-    desc: '更新 QQ 群房间广播设置 params:{enabled?, oneBotUrl?, oneBotToken?, allowedGroups?:[], serverName?, roomReportTemplate?, statusReplyTemplate?}（模板占位符 {server}/{count}/{rooms}/{time}）',
+    desc: '更新 QQ 群房间广播设置 params:{enabled?, oneBotUrl?, oneBotToken?, allowedGroups?:[], serverName?, statusTriggers?:[] (状态命令,默认["#在线状态"]), roomReportTemplate?, statusReplyTemplate?}（模板占位符 {server}/{count}/{rooms}/{time}）',
     run: async (p) => {
       const body = pick(p, ['enabled', 'oneBotUrl', 'oneBotToken', 'allowedGroups', 'serverName']);
       // Groups must be numeric for List<long> binding.

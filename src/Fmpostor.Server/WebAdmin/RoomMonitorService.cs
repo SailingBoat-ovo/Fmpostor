@@ -30,6 +30,9 @@ public class RoomMonitorSettings
     // Turbo-650：QQ 消息模板（空 = 使用内置默认；面板编辑框未修改时即显示内置默认）
     public string RoomReportTemplate { get; set; } = "";
     public string StatusReplyTemplate { get; set; } = "";
+
+    // Turbo-650：群内激活房间汇报的状态命令（默认 #在线状态，可配置多个，空 = 默认）
+    public List<string> StatusTriggers { get; set; } = new();
 }
 
 public class RoomMonitorStore
@@ -39,7 +42,8 @@ public class RoomMonitorStore
 
 /// <summary>
 ///     Room monitor / QQ broadcast (ported from Fanchuan.RoomMonitor.Plugin):
-///     connects to a OneBot v11 (NapCat) endpoint, answers "#在线状态" in
+///     connects to a OneBot v11 (NapCat) endpoint, answers the status command
+///     (default "#在线状态"; multiple configurable from the panel) in
 ///     allowed QQ groups with the room list, and lets hosts toggle per-room
 ///     broadcasting with /m on|off. Config persisted to webadmin_monitor.json.
 /// </summary>
@@ -207,12 +211,34 @@ public class RoomMonitorService : IEventListener, IDisposable
                 ServerName = _store.Settings.ServerName,
                 RoomReportTemplate = _store.Settings.RoomReportTemplate ?? "",
                 StatusReplyTemplate = _store.Settings.StatusReplyTemplate ?? "",
+                StatusTriggers = _store.Settings.StatusTriggers?.ToList() ?? new List<string>(),
             };
         }
     }
 
+    /// <summary>状态命令的内置默认（面板"恢复默认"与未配置时的回退值）。</summary>
+    public static readonly List<string> DefaultStatusTriggers = new() { "#在线状态" };
+
+    /// <summary>归一化状态命令：去空白、去重、去掉空项，最多 10 条。</summary>
+    internal static List<string> NormalizeTriggers(IEnumerable<string>? triggers)
+    {
+        return (triggers ?? Enumerable.Empty<string>())
+            .Select(t => (t ?? "").Trim())
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .Take(10)
+            .ToList();
+    }
+
+    /// <summary>当前生效的状态命令列表（未配置 = 内置默认）。</summary>
+    internal static List<string> StatusTriggerList(RoomMonitorSettings settings)
+    {
+        var list = NormalizeTriggers(settings.StatusTriggers);
+        return list.Count > 0 ? list : DefaultStatusTriggers.ToList();
+    }
+
     public void UpdateSettings(bool? enabled, string? oneBotUrl, string? oneBotToken, List<long>? allowedGroups, string? serverName,
-        string? roomReportTemplate = null, string? statusReplyTemplate = null)
+        string? roomReportTemplate = null, string? statusReplyTemplate = null, List<string>? statusTriggers = null)
     {
         lock (_lock)
         {
@@ -251,6 +277,15 @@ public class RoomMonitorService : IEventListener, IDisposable
             if (statusReplyTemplate != null)
             {
                 _store.Settings.StatusReplyTemplate = statusReplyTemplate.Trim() == DefaultStatusReplyTemplate ? "" : statusReplyTemplate;
+            }
+
+            // 状态命令：与内置默认完全一致时存空列表（= 未自定义），空提交同样回到默认。
+            if (statusTriggers != null)
+            {
+                var normalized = NormalizeTriggers(statusTriggers);
+                var isDefault = normalized.Count == DefaultStatusTriggers.Count &&
+                                !normalized.Except(DefaultStatusTriggers, StringComparer.Ordinal).Any();
+                _store.Settings.StatusTriggers = isDefault ? new List<string>() : normalized;
             }
 
             Save();
@@ -500,12 +535,14 @@ public class RoomMonitorService : IEventListener, IDisposable
             return;
         }
 
-        if (messageText == "#在线状态")
+        // Turbo-650：状态命令可配置多个（默认 #在线状态），精确匹配整条消息。
+        var triggers = StatusTriggerList(settings);
+        if (triggers.Contains(messageText, StringComparer.Ordinal))
         {
-            _logger.LogInformation("[RoomMonitor] Received #在线状态 from group {GroupId} user {Qq}.", groupId, userId);
+            _logger.LogInformation("[RoomMonitor] Received status command {Command} from group {GroupId} user {Qq}.", messageText, groupId, userId);
             var reply = BuildStatusReplyMessage(settings, _gameManager.Games);
             await SendGroupMessageAsync(settings, groupId, reply);
-            _adminStats.RecordBroadcast("qq", userId, groupId, "", "", "#在线状态");
+            _adminStats.RecordBroadcast("qq", userId, groupId, "", "", messageText);
             return;
         }
 

@@ -9,7 +9,7 @@
   <!-- Turbo-650 Enterprise UI. CSP 基线：面板使用内联处理器与用户自定义服务器地址 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>帆船控制台 · Among Us 服务器管理</title>
-  <link rel="stylesheet" href="css/style.css?v=6500905">
+  <link rel="stylesheet" href="css/style.css?v=6500906">
 </head>
 <body>
 
@@ -863,7 +863,7 @@
           <div class="card">
             <div class="card-head"><h3>📡 QQ 群房间广播（OneBot）</h3></div>
             <div class="card-body">
-              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.7;">连接 NapCat/OneBot v11 端点（收发共用此地址）。接收模式自动协商：<code>ws://</code>/<code>wss://</code> 始终走正向 WebSocket；<code>http://</code>/<code>https://</code> 会<b>优先尝试同端口 WebSocket</b>（NapCat HTTP 服务器开启"启用Ws"即支持，与原插件相同，实时推送），不可用时自动退回 HTTP 轮询（每 3 秒）。在允许的 QQ 群发送 <code>#在线状态</code> 可查看服务器房间列表；房主可用 <code>/m on|off</code> 控制广播。保存后自动重连。</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.7;">连接 NapCat/OneBot v11 端点（收发共用此地址）。接收模式自动协商：<code>ws://</code>/<code>wss://</code> 始终走正向 WebSocket；<code>http://</code>/<code>https://</code> 会<b>优先尝试同端口 WebSocket</b>（NapCat HTTP 服务器开启"启用Ws"即支持，与原插件相同，实时推送），不可用时自动退回 HTTP 轮询（每 3 秒）。在允许的 QQ 群发送状态命令（默认 <code>#在线状态</code>，面板可添加多个）可查看服务器房间列表；房主可用 <code>/m on|off</code> 控制广播。保存后自动重连。</div>
               <div class="form-row">
                 <div class="form-group"><label>启用</label><select id="monitorEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
                 <div class="form-group"><label>OneBot 地址</label><input type="text" id="monitorUrl" placeholder="如 http://127.0.0.1:3001（或 ws://…）" style="font-family:var(--mono);"></div>
@@ -873,6 +873,9 @@
                 <div class="form-group"><label>允许的 QQ 群号（逗号分隔）</label><input type="text" id="monitorGroups" placeholder="如 123456,789012"></div>
                 <div class="form-group"><label>服务器名称</label><input type="text" id="monitorServerName" placeholder="帆船 AmongUs 服务器"></div>
                 <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveMonitorSettings()">保存</button></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group" style="flex:2;"><label>状态命令（群内发这些命令即回报房间列表；多个用逗号分隔，默认 #在线状态）<a href="javascript:void(0)" onclick="resetStatusTriggers()" style="font-size:11px;margin-left:8px;">恢复默认</a></label><input type="text" id="monitorStatusTriggers" placeholder="#在线状态" style="font-family:var(--mono);"></div>
               </div>
               <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
                 <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;line-height:1.7;">🤖 QQ 消息模板（BOT 发送的两条消息可自由编辑；占位符：<code>{server}</code> 服务器名 · <code>{count}</code> 房间数 · <code>{rooms}</code> 房间列表 · <code>{time}</code> 时间。未修改时编辑框里显示的就是内置默认格式，保持原样保存即继续使用默认）</div>
@@ -885,7 +888,7 @@
                   <textarea id="monitorStatusReplyTemplate" class="rich-input" rows="5" style="width:100%;"></textarea>
                 </div>
               </div>
-              <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:10px;">群内命令：<code>#在线状态</code> 房间报告 · <code>#订阅 房间号</code> 游戏结束私信提醒 · <code>#退订 房间号</code> · <code>#帮助</code>。房主游戏内 <code>/m</code> 推送房间报告，<code>/m 备注</code> 报告中本房间附一次性备注。</div>
+              <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:10px;">群内命令：<code>#在线状态</code>（或面板配置的其它状态命令）房间报告 · <code>#订阅 房间号</code> 游戏结束私信提醒 · <code>#退订 房间号</code> · <code>#帮助</code>。房主游戏内 <code>/m</code> 推送房间报告，<code>/m 备注</code> 报告中本房间附一次性备注。</div>
             </div>
           </div>
           <div class="card">
@@ -1113,11 +1116,11 @@
       </div>
     </div>
   </div>
-  <script src="js/i18n.js?v=6500905"></script>
-  <script src="js/i18n-extra.js?v=6500905"></script>
-  <script src="js/i18n-extra2.js?v=6500905"></script>
-  <script src="js/i18n-extra3.js?v=6500905"></script>
-  <script src="js/i18n-extra4.js?v=6500905"></script>
-  <script src="js/app.js?v=6500905"></script>
+  <script src="js/i18n.js?v=6500906"></script>
+  <script src="js/i18n-extra.js?v=6500906"></script>
+  <script src="js/i18n-extra2.js?v=6500906"></script>
+  <script src="js/i18n-extra3.js?v=6500906"></script>
+  <script src="js/i18n-extra4.js?v=6500906"></script>
+  <script src="js/app.js?v=6500906"></script>
 </body>
 </html>

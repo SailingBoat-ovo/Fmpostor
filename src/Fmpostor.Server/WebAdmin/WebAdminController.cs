@@ -2012,6 +2012,9 @@ public class WebAdminController : ControllerBase
             statusReplyTemplate = s.StatusReplyTemplate,
             defaultRoomReportTemplate = RoomMonitorService.DefaultRoomReportTemplate,
             defaultStatusReplyTemplate = RoomMonitorService.DefaultStatusReplyTemplate,
+            // Turbo-650: 状态命令（默认 #在线状态，可配置多个；未配置返回生效默认）
+            statusTriggers = RoomMonitorService.StatusTriggerList(s),
+            defaultStatusTriggers = RoomMonitorService.DefaultStatusTriggers,
         });
     }
 
@@ -2036,6 +2039,7 @@ public class WebAdminController : ControllerBase
             string? name = body.TryGetProperty("serverName", out var sn) ? sn.GetString() : null;
             string? reportTpl = body.TryGetProperty("roomReportTemplate", out var rt) ? rt.GetString() : null;
             string? statusTpl = body.TryGetProperty("statusReplyTemplate", out var st) ? st.GetString() : null;
+            List<string>? statusTriggers = body.TryGetProperty("statusTriggers", out var tg) ? tg.Deserialize<List<string>>() : null;
 
             // The panel echoes the masked token back when unchanged — a masked value
             // must never overwrite the real secret; treat it as "not modified".
@@ -2044,7 +2048,7 @@ public class WebAdminController : ControllerBase
                 token = null;
             }
 
-            _roomMonitor.UpdateSettings(enabled, url, token, groups, name, reportTpl, statusTpl);
+            _roomMonitor.UpdateSettings(enabled, url, token, groups, name, reportTpl, statusTpl, statusTriggers);
             _logService.AddLog("monitor_settings", "Updated room monitor settings", GetClientIp());
             return Ok(new { success = true, message = "Monitor settings saved." });
         }
