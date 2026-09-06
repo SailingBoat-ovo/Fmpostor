@@ -55,7 +55,16 @@ public class PlayerStatsService
         _logger = logger;
         _filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, config.Value.PlayerStatsFile);
         Load();
-        _saveTimer = new System.Threading.Timer(_ => Save(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+        _saveTimer = new System.Threading.Timer(_ =>
+        {
+            // Turbo-650: persist only when something actually changed — the old
+            // timer rewrote the whole (up to 5000 players) store every minute
+            // regardless of activity.
+            if (System.Threading.Interlocked.Exchange(ref _dirty, 0) > 0)
+            {
+                Save();
+            }
+        }, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
     }
 
     private void Load()
@@ -112,10 +121,8 @@ public class PlayerStatsService
 
     private void MaybeSave()
     {
-        if (System.Threading.Interlocked.Increment(ref _dirty) % 20 == 0)
-        {
-            Save();
-        }
+        // Turbo-650: just mark dirty; the one-minute timer persists when needed.
+        System.Threading.Interlocked.Increment(ref _dirty);
     }
 
     private const int MaxEntries = 5000;

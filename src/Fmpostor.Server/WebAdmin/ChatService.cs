@@ -255,40 +255,10 @@ public class ChatService
         {
             try
             {
-                var dir = Path.GetDirectoryName(kv.Key);
-                if (!string.IsNullOrEmpty(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-
-                List<ChatLogEntry> entries;
-                if (File.Exists(kv.Key))
-                {
-                    try
-                    {
-                        var json = File.ReadAllText(kv.Key);
-                        entries = JsonSerializer.Deserialize<List<ChatLogEntry>>(json, JsonOptions) ?? new List<ChatLogEntry>();
-                    }
-                    catch
-                    {
-                        entries = new List<ChatLogEntry>();
-                    }
-                }
-                else
-                {
-                    entries = new List<ChatLogEntry>();
-                }
-
-                entries.AddRange(kv.Value);
-                if (entries.Count > MaxEntriesPerFile)
-                {
-                    entries = entries.Skip(entries.Count - MaxEntriesPerFile).ToList();
-                }
-
-                var output = JsonSerializer.Serialize(entries, JsonOptions);
-                var tmp = kv.Key + ".tmp";
-                File.WriteAllText(tmp, output);
-                File.Move(tmp, kv.Key, true);
+                // Turbo-650: append-only JSONL per (room, date) file — O(new
+                // entries) per flush instead of read+parse+rewrite of the whole
+                // day file every two seconds while a room chats.
+                JsonLines.Append(kv.Key, kv.Value, JsonOptions, maxBytes: 6 * 1024 * 1024, maxEntries: MaxEntriesPerFile);
             }
             catch
             {
@@ -338,6 +308,13 @@ public class ChatService
         if (filePath == null || !File.Exists(filePath)) return null;
 
         var json = await File.ReadAllTextAsync(filePath);
+        var trimmed = json.TrimStart();
+        if (trimmed.Length > 0 && trimmed[0] != '[')
+        {
+            // Turbo-650: JSONL store (one entry per line).
+            return JsonLines.Read<ChatLogEntry>(filePath, JsonOptions);
+        }
+
         return JsonSerializer.Deserialize<List<ChatLogEntry>>(json, JsonOptions);
     }
 
@@ -366,8 +343,7 @@ public class ChatService
             {
                 try
                 {
-                    var json = File.ReadAllText(file.Path);
-                    var entries = JsonSerializer.Deserialize<List<ChatLogEntry>>(json, JsonOptions) ?? new List<ChatLogEntry>();
+                    var entries = JsonLines.Read<ChatLogEntry>(file.Path, JsonOptions);
                     foreach (var entry in entries.TakeLast(20))
                     {
                         result.Add($"{entry.Time:MM-dd HH:mm:ss} {entry.Sender}: {entry.Message}");

@@ -66,11 +66,23 @@ public class PlayerLogService
 
             try
             {
-                var json = File.ReadAllText(_filePath);
-                var data = JsonSerializer.Deserialize<PlayerLogStoreData>(json, JsonOptions);
-                if (data?.Logs != null)
+                // Turbo-650: the store is append-only JSONL; the legacy format was a
+                // single { logs: [...] } object — both are accepted on load.
+                var text = File.ReadAllText(_filePath).TrimStart();
+                List<PlayerLogEntry>? logs;
+                if (text.Length > 0 && text[0] == '{')
                 {
-                    _entries.AddRange(data.Logs.TakeLast(MaxEntries));
+                    var data = JsonSerializer.Deserialize<PlayerLogStoreData>(text, JsonOptions);
+                    logs = data?.Logs;
+                }
+                else
+                {
+                    logs = JsonLines.Read<PlayerLogEntry>(_filePath, JsonOptions);
+                }
+
+                if (logs != null && logs.Count > 0)
+                {
+                    _entries.AddRange(logs.TakeLast(MaxEntries));
                     _logger.LogInformation("[PlayerLog] Loaded {Count} entries from {File}.", _entries.Count, _filePath);
                 }
             }
@@ -128,17 +140,10 @@ public class PlayerLogService
 
         try
         {
-            List<PlayerLogEntry> all;
-            lock (_lock)
-            {
-                all = _entries.TakeLast(MaxEntries).ToList();
-            }
-
-            var data = new PlayerLogStoreData { Logs = all };
-            var json = JsonSerializer.Serialize(data, JsonOptions);
-            var tmp = _filePath + ".tmp";
-            File.WriteAllText(tmp, json);
-            File.Move(tmp, _filePath, true);
+            // Turbo-650: append-only JSONL — O(new entries) per flush instead of
+            // re-serializing and rewriting the whole store (up to 20k entries)
+            // every ten seconds while chat is active.
+            JsonLines.Append(_filePath, batch, JsonOptions, maxBytes: 8 * 1024 * 1024, maxEntries: MaxEntries);
         }
         catch (Exception ex)
         {

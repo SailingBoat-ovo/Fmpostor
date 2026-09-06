@@ -93,6 +93,7 @@ dotnet publish src/Fmpostor.Server/Fmpostor.Server.csproj -c Release -r linux-x6
 
 - **QQ 群命令接收重做（混合模式）**：对照原版 Fanchuan.RoomMonitor.Plugin 源码确认根因——原插件用"与 HTTP API 同端口的正向 WebSocket"接收（NapCat HTTP 服务器开启"启用Ws"即支持），640 的 HTTP 轮询在部分 NapCat 上取不到群消息。650 优先同端口 WebSocket 推送（实时、与原插件同款），不可用自动退回 HTTP 轮询并定期重试；消息水位跨模式保持，不重放不丢窗口；token 同时兼容 `access_token` 查询参数与 `Authorization` 头
 - **QQ 消息模板**：BOT 发送的两条消息（`/m` 房间报告、`#在线状态` 回复）可在面板像欢迎语一样自由编辑，占位符 `{server}` `{count}` `{rooms}` `{time}`；未修改时编辑框直接显示内置默认格式，默认输出与 640 逐字一致
+- **服务端性能优化**：高频日志（聊天/玩家行为/连接记录）改为追加式 JSONL 持久化——聊天活跃时落盘成本从"每 2~10 秒全量重写数千条大文件"降为"只追加新条目"，CPU 与磁盘 I/O 大幅下降；屏蔽词/广播/战绩/足迹统计改为脏标记节流落盘（空闲时近乎零写入）；发布启用 ReadyToRun 预编译（启动更快）。旧数据文件自动迁移，无需手动处理
 - **全局版本号**更新至 Turbo-650.0-20260905
 - 完整更新日志见 `Turbo650更新日志.txt`
 

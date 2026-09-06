@@ -65,6 +65,9 @@ public class AdminStatsService
     private readonly object _bLock = new();
     private FilterStatsStore _filter = new();
     private BroadcastStatsStore _broadcast = new();
+    private bool _filterDirty;
+    private bool _broadcastDirty;
+    private readonly System.Threading.Timer _saveTimer;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -79,6 +82,37 @@ public class AdminStatsService
         _filterFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, config.Value.FilterStatsFile);
         _broadcastFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, config.Value.BroadcastStatsFile);
         LoadAll();
+        // Turbo-650: records no longer rewrite the store file on every event —
+        // dirty stores are persisted by this timer (and immediately on clears).
+        _saveTimer = new System.Threading.Timer(_ => SaveDirty(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    private void SaveDirty()
+    {
+        try
+        {
+            lock (_fLock)
+            {
+                if (_filterDirty)
+                {
+                    _filterDirty = false;
+                    SaveFilterLocked();
+                }
+            }
+
+            lock (_bLock)
+            {
+                if (_broadcastDirty)
+                {
+                    _broadcastDirty = false;
+                    SaveBroadcastLocked();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Stats] SaveDirty failed.");
+        }
     }
 
     private void LoadAll()
@@ -183,7 +217,7 @@ public class AdminStatsService
                     _filter.Stats = _filter.Stats.OrderByDescending(x => x.LastTime).Take(MaxFilterEntries).ToList();
                 }
 
-                SaveFilterLocked();
+                _filterDirty = true;
             }
         }
         catch (Exception ex)
@@ -241,7 +275,7 @@ public class AdminStatsService
                     _broadcast.Stats = _broadcast.Stats.OrderByDescending(x => x.Time).Take(MaxBroadcastRows).ToList();
                 }
 
-                SaveBroadcastLocked();
+                _broadcastDirty = true;
             }
         }
         catch (Exception ex)

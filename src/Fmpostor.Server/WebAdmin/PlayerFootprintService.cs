@@ -130,10 +130,8 @@ public class PlayerFootprintService : IDisposable
 
     private void MaybeSave()
     {
-        if (System.Threading.Interlocked.Increment(ref _dirty) % 20 == 0)
-        {
-            Save();
-        }
+        // Turbo-650: mark dirty only; Tick persists when something changed.
+        System.Threading.Interlocked.Increment(ref _dirty);
     }
 
     private void Tick()
@@ -185,6 +183,13 @@ public class PlayerFootprintService : IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[Footprint] Tick failed.");
+        }
+
+        // Turbo-650: persist only when sessions settled / data changed since the
+        // last tick, instead of rewriting the whole store on every 30s tick.
+        if (System.Threading.Interlocked.Exchange(ref _dirty, 0) > 0)
+        {
+            Save();
         }
     }
 

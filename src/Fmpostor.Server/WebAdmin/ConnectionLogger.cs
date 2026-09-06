@@ -99,34 +99,9 @@ public class ConnectionLogger
                 _currentFile = Path.Combine(_logDir, $"{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.json");
             }
 
-            List<ConnectLogEntry> existing;
-            if (File.Exists(_currentFile))
-            {
-                try
-                {
-                    var json = File.ReadAllText(_currentFile);
-                    existing = JsonSerializer.Deserialize<List<ConnectLogEntry>>(json, JsonOptions) ?? new();
-                }
-                catch
-                {
-                    existing = new();
-                }
-            }
-            else
-            {
-                existing = new();
-            }
-
-            existing.AddRange(entries);
-            if (existing.Count > MaxEntriesPerFile)
-            {
-                existing = existing.Skip(existing.Count - MaxEntriesPerFile).ToList();
-            }
-
-            var output = JsonSerializer.Serialize(existing, JsonOptions);
-            var tmp = _currentFile + ".tmp";
-            File.WriteAllText(tmp, output);
-            File.Move(tmp, _currentFile, true);
+            // Turbo-650: append-only JSONL — O(new entries) per flush instead of
+            // read+parse+rewrite of the whole current file.
+            JsonLines.Append(_currentFile, entries, JsonOptions);
         }
         catch
         {
@@ -161,8 +136,7 @@ public class ConnectionLogger
 
         try
         {
-            var json = File.ReadAllText(filePath);
-            var entries = JsonSerializer.Deserialize<List<ConnectLogEntry>>(json, JsonOptions) ?? new();
+            var entries = JsonLines.Read<ConnectLogEntry>(filePath, JsonOptions);
             if (!string.IsNullOrEmpty(filter))
                 entries = entries.Where(e => e.Type == filter).ToList();
             entries.Reverse();
