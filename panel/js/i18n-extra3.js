@@ -175,7 +175,7 @@
     '👥 QQ群': '👥 QQ群',
     // —— 页面标题 ——
     '帆船控制台 · Among Us 服务器管理': '帆船控制台 · Among Us 伺服器管理',
-    '连接到你的帆船服务器 · Turbo-640': '連線到你的帆船伺服器 · Turbo-640',
+    '连接到你的帆船服务器 · Turbo-640': '連線到你的帆船伺服器 · Turbo-650',
     // —— AI 聊天记录统计 ——
     '本页 ': '本頁 ', '🖥 面板 ': '🖥 面板 ', '🎮 游戏内 ': '🎮 遊戲內 ', '🤖 Agent ': '🤖 Agent ',
     '⏰ 定时任务 ': '⏰ 定時任務 ', '今日 ': '今日 ', '问:': '問:', '答:': '答:',
@@ -374,7 +374,7 @@
     '👥 QQ群': '👥 QQ Group',
     // —— 页面标题 ——
     '帆船控制台 · Among Us 服务器管理': 'FanChuan Console · Among Us Server Management',
-    '连接到你的帆船服务器 · Turbo-640': 'Connect to your FanChuan server · Turbo-640',
+    '连接到你的帆船服务器 · Turbo-640': 'Connect to your FanChuan server · Turbo-650',
     // —— AI 聊天记录统计 ——
     '本页 ': 'This page ', '🖥 面板 ': '🖥 Panel ', '🎮 游戏内 ': '🎮 In-Game ', '🤖 Agent ': '🤖 Agent ',
     '⏰ 定时任务 ': '⏰ Scheduled ', '今日 ': 'Today ', '问:': 'Q:', '答:': 'A:',

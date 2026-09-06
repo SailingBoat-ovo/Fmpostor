@@ -1,0 +1,62 @@
+══════════════════════════════════════════════════════════════
+ Fmpostor Turbo-650.0-20260905 更新日志
+ （上一版本：Turbo-640.0-20260901）
+══════════════════════════════════════════════════════════════
+
+【 版本号 】
+· 全局版本号 Turbo-640 → Turbo-650.0-20260905：
+  - 自动更新服务（UpdateService.CurrentVersion）
+  - 浏览器直访服务端根路径的欢迎页（http://IP:22023/）
+  - /api/server 的 version 字段（WebAdminController.PluginVersion）
+  - 面板登录页标语与 CSP 注释、app.js 文件头
+  - 面板静态资源版本参数 ?v= 全部更新为 6500905
+  - i18n-extra3 登录标语键同步 Turbo-650（繁中/英文）
+
+【 QQ 群命令接收重做：混合模式，彻底修复 #在线状态 失灵 】
+· 根因确认：对照原版 Fanchuan.RoomMonitor.Plugin 源码分析，原插件
+  的接收方式是"与 HTTP API 同端口的正向 WebSocket"（NapCat 的
+  HTTP 服务器开启"启用Ws"后，同端口同时提供 WS 事件推送），
+  并不是 HTTP 轮询；640 改成的 get_group_msg_history 轮询在部分
+  NapCat 版本上取不到群消息，导致 #在线状态 无响应。
+· Turbo-650 混合接收（http(s):// 地址）：
+  1) 优先尝试与 HTTP API 同端口的正向 WebSocket（URL 直接换
+     ws:// 前缀、不追加路径，与原插件一致）；连接成功即长驻监听，
+     群命令实时推送，零轮询；
+  2) WS 不可用（未开"启用Ws"等）时自动退回 HTTP 轮询
+     get_group_msg_history（每 3 秒）；
+  3) 轮询每 20 轮（约 1 分钟）自动让位，重新尝试一次 WS——
+     NapCat 之后开了"启用Ws"无需改配置即可自动升级为推送模式；
+  4) 水位保存在服务实例字段，WS/轮询切换不丢消息窗口、不重放
+     历史命令（WS 断开恢复轮询时重置水位，跳过 WS 期间已处理的
+     消息）。
+· Token 鉴权对齐原插件：WS 连接同时携带 access_token 查询参数
+  （原插件方式，兼容性最好）与 Authorization 头；HTTP 发送保持
+  Authorization 头不变。
+· ws:// / wss:// 地址行为不变（始终正向 WebSocket）。
+· 日志增强：模式切换、WS 连接成功/失败原因、轮询持续失败均有
+  明确的 [RoomMonitor] 日志，方便排查。
+
+【 面板：QQ 消息模板编辑框（像欢迎语一样可自由编辑） 】
+· BOT 发送的两条消息现在都可以在面板"服务器选项 → QQ 群房间广播"
+  里自定义：
+  - 消息一 · /m 房间报告 模板
+  - 消息二 · #在线状态 回复 模板
+· 占位符：{server} 服务器名 · {count} 房间数 · {rooms} 房间列表
+  （自动渲染，无房间时显示"当前没有活跃房间"）· {time} 服务器时间。
+· 默认格式保留：玩家（管理员）还没有修改时，编辑框里直接显示
+  内置默认格式，保持原样保存即继续使用默认；提供"恢复默认"快捷
+  链接；模板与默认完全一致时服务端自动按"未自定义"存储，以后默认
+  格式演进仍会自动生效。
+· 内置默认与 640 及更早版本的输出逐字一致，升级无感知。
+· AI 助手 update_monitor_settings / get_monitor_settings 工具同步
+  支持模板参数。
+
+【 部署与发布 】
+· win\ 与 linux\ 全量更新（双名单文件部署；linux 上传后 chmod +x）。
+· panel\ 更新（index.html + app.js + i18n-extra3.js）。
+· 开源仓库已提交推送；GitHub Release tag "Turbo-650.0"（正式版，
+  资产：Fmpostor.Server-win-x64.zip / Fmpostor.Server-linux-x64.tar.gz /
+  Fmpostor.WebPanel.zip，均不含 config.json / webadmin_*.json）。
+· 640 老服务器可在面板"自动更新"一键升级（640 → 650）。
+
+—— 2026-09-05

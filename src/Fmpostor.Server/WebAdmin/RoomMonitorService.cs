@@ -26,6 +26,10 @@ public class RoomMonitorSettings
     public string OneBotToken { get; set; } = "";
     public List<long> AllowedGroups { get; set; } = new();
     public string ServerName { get; set; } = "帆船 AmongUs 服务器";
+
+    // Turbo-650：QQ 消息模板（空 = 使用内置默认；面板编辑框未修改时即显示内置默认）
+    public string RoomReportTemplate { get; set; } = "";
+    public string StatusReplyTemplate { get; set; } = "";
 }
 
 public class RoomMonitorStore
@@ -60,6 +64,10 @@ public class RoomMonitorService : IEventListener, IDisposable
     private long _fileVersion = -1;
     private CancellationTokenSource? _cts;
     private IDisposable? _eventRegistration;
+
+    // HTTP 轮询水位（实例级：WS/轮询模式切换时保留，不重放、不丢窗口）
+    private readonly Dictionary<long, long> _pollLastIds = new();
+    private readonly HashSet<long> _pollInitialized = new();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -197,11 +205,14 @@ public class RoomMonitorService : IEventListener, IDisposable
                 OneBotToken = _store.Settings.OneBotToken,
                 AllowedGroups = _store.Settings.AllowedGroups.ToList(),
                 ServerName = _store.Settings.ServerName,
+                RoomReportTemplate = _store.Settings.RoomReportTemplate ?? "",
+                StatusReplyTemplate = _store.Settings.StatusReplyTemplate ?? "",
             };
         }
     }
 
-    public void UpdateSettings(bool? enabled, string? oneBotUrl, string? oneBotToken, List<long>? allowedGroups, string? serverName)
+    public void UpdateSettings(bool? enabled, string? oneBotUrl, string? oneBotToken, List<long>? allowedGroups, string? serverName,
+        string? roomReportTemplate = null, string? statusReplyTemplate = null)
     {
         lock (_lock)
         {
@@ -231,6 +242,17 @@ public class RoomMonitorService : IEventListener, IDisposable
                 _store.Settings.ServerName = serverName.Trim();
             }
 
+            // 模板与内置默认一致时存空串：默认格式以后演进时仍自动生效。
+            if (roomReportTemplate != null)
+            {
+                _store.Settings.RoomReportTemplate = roomReportTemplate.Trim() == DefaultRoomReportTemplate ? "" : roomReportTemplate;
+            }
+
+            if (statusReplyTemplate != null)
+            {
+                _store.Settings.StatusReplyTemplate = statusReplyTemplate.Trim() == DefaultStatusReplyTemplate ? "" : statusReplyTemplate;
+            }
+
             Save();
             _logger.LogInformation("[RoomMonitor] Settings updated (enabled={Enabled}).", _store.Settings.Enabled);
 
@@ -253,10 +275,11 @@ public class RoomMonitorService : IEventListener, IDisposable
             try
             {
                 // Turbo-620 修订：ws:// / wss:// 走正向 WebSocket 接收；
-                // http:// / https:// 走 HTTP 轮询接收（get_group_msg_history），
-                // 与 /m 的发送通道一致，不再依赖 NapCat 的"启用Ws"选项。
-                // 注意：接收循环必须由 Program.cs 调用 Start() 才会运行
-                // （此前 Start() 从未被调用，群命令永远收不到）。
+                // http:// / https:// 走混合接收（Turbo-650）：优先尝试与 HTTP API
+                // 同端口的 WebSocket（NapCat HTTP 服务器开启"启用Ws"时可用，
+                // 与原 Fanchuan.RoomMonitor.Plugin 相同的接收方式，实时推送），
+                // WS 不可用时退回 HTTP 轮询 get_group_msg_history，并定期重试 WS。
+                // 注意：接收循环必须由 Program.cs 调用 Start() 才会运行。
                 var url = GetSettings().OneBotUrl ?? "";
                 if (url.StartsWith("ws://", StringComparison.OrdinalIgnoreCase) ||
                     url.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
@@ -265,7 +288,7 @@ public class RoomMonitorService : IEventListener, IDisposable
                 }
                 else
                 {
-                    await HttpPollLoopAsync(cancellation);
+                    await ReceiveHttpEndpointAsync(cancellation);
                 }
             }
             catch (OperationCanceledException)
@@ -287,13 +310,35 @@ public class RoomMonitorService : IEventListener, IDisposable
         }
     }
 
-    private async Task ConnectAndListenAsync(CancellationToken cancellation)
+    /// <summary>
+    ///     Turbo-650 混合接收入口：http(s):// 地址先尝试与 HTTP API 同端口的
+    ///     正向 WebSocket（NapCat "启用Ws"，原插件接收方式），连上即长驻监听；
+    ///     连不上立即退回 HTTP 轮询。WS 会话结束后清空轮询水位，防止恢复
+    ///     轮询时重放 WS 期间已处理过的消息。
+    /// </summary>
+    private async Task ReceiveHttpEndpointAsync(CancellationToken cancellation)
+    {
+        if (await ConnectAndListenAsync(cancellation))
+        {
+            _pollInitialized.Clear();
+            _pollLastIds.Clear();
+            return;
+        }
+
+        await HttpPollLoopAsync(cancellation);
+    }
+
+    /// <summary>
+    ///     正向 WebSocket 接收。returns=true 表示连接曾建立并监听至断开；
+    ///     false 表示连接尝试失败（可退回 HTTP 轮询）。
+    /// </summary>
+    private async Task<bool> ConnectAndListenAsync(CancellationToken cancellation)
     {
         var settings = GetSettings();
         if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.OneBotUrl))
         {
-            await Task.Delay(TimeSpan.FromSeconds(10), cancellation);
-            return;
+            await SleepAsync(cancellation, 10000);
+            return false;
         }
 
         // Only WebSocket endpoints are supported for receiving messages.
@@ -302,18 +347,37 @@ public class RoomMonitorService : IEventListener, IDisposable
             .Replace("https://", "wss://", StringComparison.OrdinalIgnoreCase)
             .TrimEnd('/');
 
-        _logger.LogInformation("[RoomMonitor] Connecting to OneBot WebSocket: {Url}", wsUrl);
-
         using var ws = new ClientWebSocket();
-        // Send the token as an Authorization header instead of an access_token query
-        // parameter so it never lands in NapCat/proxy/server access logs.
         if (!string.IsNullOrWhiteSpace(settings.OneBotToken))
         {
+            // 与原 Fanchuan.RoomMonitor.Plugin 一致：token 走 access_token 查询参数
+            // （NapCat WS 鉴权最兼容的方式）；同时保留 Authorization 头兼容其他实现，
+            // 两者都不会把 token 明文写进服务器访问日志以外的文件。
             ws.Options.SetRequestHeader("Authorization", "Bearer " + settings.OneBotToken);
+            wsUrl += (wsUrl.Contains('?') ? "&" : "?") + "access_token=" + Uri.EscapeDataString(settings.OneBotToken);
         }
 
-        await ws.ConnectAsync(new Uri(wsUrl), cancellation);
-        _logger.LogInformation("[RoomMonitor] OneBot WebSocket connected.");
+        _logger.LogInformation("[RoomMonitor] Trying OneBot WebSocket on same host/port as the HTTP API (push mode, like the original plugin)...");
+
+        try
+        {
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            connectCts.CancelAfter(TimeSpan.FromSeconds(8));
+            await ws.ConnectAsync(new Uri(wsUrl), connectCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            _logger.LogInformation("[RoomMonitor] WebSocket connect timed out; falling back to HTTP polling.");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation("[RoomMonitor] WebSocket unavailable on this endpoint ({Reason}); falling back to HTTP polling.",
+                ex.Message.Length > 120 ? ex.Message[..120] : ex.Message);
+            return false;
+        }
+
+        _logger.LogInformation("[RoomMonitor] OneBot WebSocket connected — receiving group events (push mode).");
 
         var buffer = new byte[1024 * 64];
         var messageBuffer = new StringBuilder();
@@ -343,6 +407,8 @@ public class RoomMonitorService : IEventListener, IDisposable
                 await ProcessMessageAsync(json);
             }
         }
+
+        return true;
     }
 
     private async Task ProcessMessageAsync(string json)
@@ -437,7 +503,7 @@ public class RoomMonitorService : IEventListener, IDisposable
         if (messageText == "#在线状态")
         {
             _logger.LogInformation("[RoomMonitor] Received #在线状态 from group {GroupId} user {Qq}.", groupId, userId);
-            var reply = BuildRoomStatusMessage(settings.ServerName, _gameManager.Games);
+            var reply = BuildStatusReplyMessage(settings, _gameManager.Games);
             await SendGroupMessageAsync(settings, groupId, reply);
             _adminStats.RecordBroadcast("qq", userId, groupId, "", "", "#在线状态");
             return;
@@ -461,11 +527,11 @@ public class RoomMonitorService : IEventListener, IDisposable
     private sealed record PolledGroupMessage(long MessageId, long UserId, string Text);
 
     /// <summary>
-    ///     HTTP 接收模式：不依赖 WebSocket，直接轮询 OneBot HTTP API
+    ///     HTTP 接收模式（Turbo-650 退回路径）：直接轮询 OneBot HTTP API
     ///     get_group_msg_history（NapCat / go-cqhttp / Lagrange 等均实现）。
-    ///     与发送（/m、广播）共用同一条 HTTP 通道——只要 /m 能发出去，
-    ///     #在线状态 等群命令就能被检测到。每 3 秒一轮，按 message_id
-    ///     去重；每组首轮只记录水位不执行命令（避免重启后重放历史）。
+    ///     每 3 秒一轮，按 message_id 去重；每组首轮只记录水位不执行命令
+    ///     （避免重放历史）。每 20 轮（约 1 分钟）返回一次，让 RunLoop 重新
+    ///     尝试同端口 WebSocket（水位保存在实例字段，切换不丢、不重放）。
     /// </summary>
     private async Task HttpPollLoopAsync(CancellationToken cancellation)
     {
@@ -483,9 +549,8 @@ public class RoomMonitorService : IEventListener, IDisposable
 
         _logger.LogInformation("[RoomMonitor] HTTP polling mode: receiving group messages via get_group_msg_history on {Url} (3s interval).", settings.OneBotUrl);
 
-        var lastIds = new Dictionary<long, long>();
-        var initialized = new HashSet<long>();
         var consecutiveFailures = 0;
+        var rounds = 0;
 
         while (!cancellation.IsCancellationRequested)
         {
@@ -523,15 +588,15 @@ public class RoomMonitorService : IEventListener, IDisposable
                         continue;
                     }
 
-                    if (!initialized.Contains(groupId))
+                    if (!_pollInitialized.Contains(groupId))
                     {
                         // 首轮：只推进水位，不执行历史消息里的命令
-                        initialized.Add(groupId);
-                        lastIds[groupId] = msgs.Count > 0 ? msgs[^1].MessageId : 0;
+                        _pollInitialized.Add(groupId);
+                        _pollLastIds[groupId] = msgs.Count > 0 ? msgs[^1].MessageId : 0;
                         continue;
                     }
 
-                    var last = lastIds.TryGetValue(groupId, out var l) ? l : 0;
+                    var last = _pollLastIds.TryGetValue(groupId, out var l) ? l : 0;
                     foreach (var m in msgs)
                     {
                         if (m.MessageId <= last)
@@ -539,7 +604,7 @@ public class RoomMonitorService : IEventListener, IDisposable
                             continue;
                         }
 
-                        lastIds[groupId] = m.MessageId;
+                        _pollLastIds[groupId] = m.MessageId;
                         await HandleGroupCommandAsync(settings, groupId, m.UserId, m.Text);
                     }
                 }
@@ -560,6 +625,13 @@ public class RoomMonitorService : IEventListener, IDisposable
                 _logger.LogWarning(
                     "[RoomMonitor] HTTP polling keeps failing on {Url}. 请确认该地址是 NapCat 的 HTTP 服务器地址（/m 能发送即 HTTP 可用）；若想用正向 WebSocket 接收，请把地址改成 ws:// 开头。",
                     settings.OneBotUrl);
+            }
+
+            // 每 20 轮让出一次，给同端口 WebSocket 一次重试机会（RunLoop 驱动）。
+            if (++rounds >= 20)
+            {
+                _logger.LogInformation("[RoomMonitor] Polling handover: retrying same-port WebSocket before the next polling stretch.");
+                return;
             }
 
             if (!await SleepAsync(cancellation, 3000))
@@ -690,18 +762,38 @@ public class RoomMonitorService : IEventListener, IDisposable
         }
     }
 
-    private string BuildRoomStatusMessage(string serverName, IEnumerable<IGame> games)
+    // ========== QQ 消息模板（Turbo-650） ==========
+
+    /// <summary>/m 房间报告的内置默认格式（面板编辑框未修改时显示并使用这一份）。</summary>
+    public const string DefaultRoomReportTemplate = "📡 {server} · 房间报告\n{rooms}";
+
+    /// <summary>#在线状态 回复的内置默认格式（与 640 及更早版本的输出完全一致）。</summary>
+    public const string DefaultStatusReplyTemplate = "📡 {server} · 房间报告\n{rooms}";
+
+    /// <summary>
+    ///     渲染 QQ 消息模板。占位符：{server} 服务器名、{count} 房间数、
+    ///     {rooms} 房间列表（自动渲染，无房间时为"当前没有活跃房间"）、
+    ///     {time} 服务器本地时间。模板为空时使用内置默认。
+    /// </summary>
+    private static string RenderQqTemplate(string template, string defaultTemplate, RoomMonitorSettings settings, IEnumerable<IGame> games)
     {
         var roomList = games.Where(IsBroadcastEnabled).ToList();
-        var sb = new StringBuilder();
-        sb.Append("📡 ").Append(serverName).AppendLine(" · 房间报告");
+        var body = string.IsNullOrWhiteSpace(template) ? defaultTemplate : template.Replace("\\n", "\n");
+        return body
+            .Replace("{server}", settings.ServerName ?? "")
+            .Replace("{count}", roomList.Count.ToString())
+            .Replace("{rooms}", RenderRoomListBody(roomList))
+            .Replace("{time}", DateTime.Now.ToString("MM-dd HH:mm"));
+    }
 
+    private static string RenderRoomListBody(List<IGame> roomList)
+    {
         if (roomList.Count == 0)
         {
-            sb.AppendLine("▶ 当前没有活跃房间");
-            return sb.ToString();
+            return "▶ 当前没有活跃房间";
         }
 
+        var sb = new StringBuilder();
         sb.Append("▶ 在线房间数: ").Append(roomList.Count).AppendLine();
         sb.AppendLine("───");
 
@@ -728,7 +820,17 @@ public class RoomMonitorService : IEventListener, IDisposable
             index++;
         }
 
-        return sb.ToString();
+        return sb.ToString().TrimEnd('\r', '\n');
+    }
+
+    private string BuildRoomStatusMessage(RoomMonitorSettings settings, IEnumerable<IGame> games)
+    {
+        return RenderQqTemplate(settings.RoomReportTemplate, DefaultRoomReportTemplate, settings, games);
+    }
+
+    private string BuildStatusReplyMessage(RoomMonitorSettings settings, IEnumerable<IGame> games)
+    {
+        return RenderQqTemplate(settings.StatusReplyTemplate, DefaultStatusReplyTemplate, settings, games);
     }
 
     private static string FormatGameState(GameStates state)
@@ -849,13 +951,14 @@ public class RoomMonitorService : IEventListener, IDisposable
                 e.Game.Items[RoomRemarkKey] = remark;
             }
 
-            var push = BuildRoomStatusMessage(GetSettings().ServerName, _gameManager.Games);
-            var groups = GetSettings().AllowedGroups ?? new List<long>();
+            var monitorSettings = GetSettings();
+            var push = BuildRoomStatusMessage(monitorSettings, _gameManager.Games);
+            var groups = monitorSettings.AllowedGroups ?? new List<long>();
             var delivered = 0;
             var statContent = remark.Length > 0 ? "备注：" + remark : "房间报告";
             foreach (var gid in groups)
             {
-                if (await SendGroupMessageAsync(GetSettings(), gid, push))
+                if (await SendGroupMessageAsync(monitorSettings, gid, push))
                 {
                     delivered++;
                     _adminStats.RecordBroadcast("game", 0, gid,

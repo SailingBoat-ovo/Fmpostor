@@ -43,7 +43,7 @@ public class WebAdminController : ControllerBase
     private readonly UpdateService _update;
     private readonly ILogger<WebAdminController> _logger;
 
-    private static readonly string PluginVersion = "Turbo-640.0-20260901";
+    private static readonly string PluginVersion = "Turbo-650.0-20260905";
 
     public WebAdminController(
         GameTrackerService tracker,
@@ -2007,6 +2007,11 @@ public class WebAdminController : ControllerBase
             oneBotToken = MaskSecret(s.OneBotToken),
             allowedGroups = s.AllowedGroups,
             serverName = s.ServerName,
+            // Turbo-650: QQ 消息模板（空 = 使用内置默认；面板未修改时在编辑框里显示默认值）
+            roomReportTemplate = s.RoomReportTemplate,
+            statusReplyTemplate = s.StatusReplyTemplate,
+            defaultRoomReportTemplate = RoomMonitorService.DefaultRoomReportTemplate,
+            defaultStatusReplyTemplate = RoomMonitorService.DefaultStatusReplyTemplate,
         });
     }
 
@@ -2029,6 +2034,8 @@ public class WebAdminController : ControllerBase
             string? token = body.TryGetProperty("oneBotToken", out var t) ? t.GetString() : null;
             List<long>? groups = body.TryGetProperty("allowedGroups", out var g) ? g.Deserialize<List<long>>() : null;
             string? name = body.TryGetProperty("serverName", out var sn) ? sn.GetString() : null;
+            string? reportTpl = body.TryGetProperty("roomReportTemplate", out var rt) ? rt.GetString() : null;
+            string? statusTpl = body.TryGetProperty("statusReplyTemplate", out var st) ? st.GetString() : null;
 
             // The panel echoes the masked token back when unchanged — a masked value
             // must never overwrite the real secret; treat it as "not modified".
@@ -2037,7 +2044,7 @@ public class WebAdminController : ControllerBase
                 token = null;
             }
 
-            _roomMonitor.UpdateSettings(enabled, url, token, groups, name);
+            _roomMonitor.UpdateSettings(enabled, url, token, groups, name, reportTpl, statusTpl);
             _logService.AddLog("monitor_settings", "Updated room monitor settings", GetClientIp());
             return Ok(new { success = true, message = "Monitor settings saved." });
         }

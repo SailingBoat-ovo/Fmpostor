@@ -1,6 +1,6 @@
 /* ============================================
    帆船 Impostor Server 管理面板 - App
-   Version: Turbo-640.0-20260901
+   Version: Turbo-650.0-20260905
    安全加固：esc() 属性安全化、Agent 操作确认与消毒、
    默认 HTTPS、密码强度、XSS 字段转义补全
    ============================================ */
@@ -1170,6 +1170,19 @@ async function loadMonitorSettings() {
   $('monitorToken').value = d.oneBotToken || '';
   $('monitorGroups').value = (d.allowedGroups || []).join(',');
   $('monitorServerName').value = d.serverName || '';
+  // 未自定义模板时，编辑框里直接显示内置默认格式（保存原样即等于默认）
+  window._monitorDefaults = {
+    defaultRoomReportTemplate: d.defaultRoomReportTemplate || '',
+    defaultStatusReplyTemplate: d.defaultStatusReplyTemplate || '',
+  };
+  $('monitorRoomReportTemplate').value = d.roomReportTemplate || d.defaultRoomReportTemplate || '';
+  $('monitorStatusReplyTemplate').value = d.statusReplyTemplate || d.defaultStatusReplyTemplate || '';
+}
+
+function resetMonitorTemplate(textareaId, defaultKey) {
+  const d = window._monitorDefaults || {};
+  $(textareaId).value = d[defaultKey] || '';
+  toast('已恢复为内置默认格式，保存后生效', 'info');
 }
 
 async function saveMonitorSettings() {
@@ -1180,6 +1193,8 @@ async function saveMonitorSettings() {
     oneBotToken: $('monitorToken').value.trim(),
     allowedGroups: groups,
     serverName: $('monitorServerName').value.trim(),
+    roomReportTemplate: $('monitorRoomReportTemplate').value,
+    statusReplyTemplate: $('monitorStatusReplyTemplate').value,
   });
   if (d) toast(d.success ? '广播设置已保存并生效' : d.message, d.success ? 'success' : 'error');
 }
@@ -2082,7 +2097,7 @@ const AGENT_TOOLS = {
     run: async () => {
       const d = await api('GET', '/api/monitor');
       if (!d || !d.success) return { ok: false, summary: '无法获取广播设置' };
-      return { ok: true, summary: '启用=' + (d.enabled ? '是' : '否') + ' 地址=' + (d.oneBotUrl || '未设置') + ' 群=' + ((d.allowedGroups || []).join(',') || '无') };
+      return { ok: true, summary: '启用=' + (d.enabled ? '是' : '否') + ' 地址=' + (d.oneBotUrl || '未设置') + ' 群=' + ((d.allowedGroups || []).join(',') || '无') + ' 模板=' + (d.roomReportTemplate || '默认') };
     },
   },
   get_player_times: {
@@ -2231,7 +2246,7 @@ const AGENT_TOOLS = {
     },
   },
   update_monitor_settings: {
-    desc: '更新 QQ 群房间广播设置 params:{enabled?, oneBotUrl?, oneBotToken?, allowedGroups?:[], serverName?}',
+    desc: '更新 QQ 群房间广播设置 params:{enabled?, oneBotUrl?, oneBotToken?, allowedGroups?:[], serverName?, roomReportTemplate?, statusReplyTemplate?}（模板占位符 {server}/{count}/{rooms}/{time}）',
     run: async (p) => {
       const body = pick(p, ['enabled', 'oneBotUrl', 'oneBotToken', 'allowedGroups', 'serverName']);
       // Groups must be numeric for List<long> binding.
