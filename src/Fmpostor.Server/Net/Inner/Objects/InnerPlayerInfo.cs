@@ -65,6 +65,45 @@ namespace Fmpostor.Server.Net.Inner.Objects
 
         public uint PlayerLevel { get; internal set; }
 
+        /// <summary>
+        ///     Friend code recorded for this player info (set when the server spawns it, or
+        ///     taken from the host's data when the host owns the object).
+        /// </summary>
+        public string? FriendCode { get; internal set; }
+
+        /// <summary>PUID recorded for this player info, same rules as <see cref="FriendCode" />.</summary>
+        public string? Puid { get; internal set; }
+
+        /// <summary>
+        ///     The identifiers written into the player info that clients receive.
+        /// </summary>
+        /// <remarks>
+        ///     游戏大厅右上角的社交面板(手机按钮)显示的好友代码, 来自这个对象里的 FriendCode。
+        ///     原版客户端在服务端权威模式下, 这个对象由服务端生成并序列化 —— 以前这里固定写空串,
+        ///     所以任何人都看不到别人的代码。
+        ///
+        ///     优先用该玩家连接上服务端已知的身份(登录时换取的真实代码); 连接已不在
+        ///     (例如重连后的旧身份)时退回本对象记录的值。占位代码不下发。
+        /// </remarks>
+        private (string FriendCode, string Puid) ResolveIdentifiers()
+        {
+            var owner = Game.GetClientPlayer(ClientId);
+
+            var friendCode = owner?.Client.FriendCode;
+            if (string.IsNullOrWhiteSpace(friendCode))
+            {
+                friendCode = FriendCode;
+            }
+
+            var puid = owner?.Client.Puid;
+            if (string.IsNullOrWhiteSpace(puid))
+            {
+                puid = Puid;
+            }
+
+            return (FriendCodeFilter.ForClients(friendCode), puid?.Trim() ?? string.Empty);
+        }
+
         public bool CanMurder(IGame game, IDateTimeProvider dateTimeProvider)
         {
             if (!IsImpostor)
@@ -128,8 +167,9 @@ namespace Fmpostor.Server.Net.Inner.Objects
                 Tasks[i].Serialize(writer);
             }
 
-            writer.Write(string.Empty); // FriendCode
-            writer.Write(string.Empty); // PUID
+            var (friendCode, puid) = ResolveIdentifiers();
+            writer.Write(friendCode);
+            writer.Write(puid);
             return new ValueTask<bool>(true);
         }
 
@@ -175,9 +215,20 @@ namespace Fmpostor.Server.Net.Inner.Objects
                 Tasks[i].Deserialize(reader);
             }
 
-            // Fmpostor doesn't expose fields that aren't properly validated
-            reader.ReadString(); // FriendCode
-            reader.ReadString(); // PUID
+            // 房主拥有这个对象时, 它声明的代码只在服务端自己不知道时才采用:
+            // 服务端登录时换到的身份才是权威值, 房主的声明不能覆盖它。
+            var claimedFriendCode = reader.ReadString();
+            var claimedPuid = reader.ReadString();
+
+            if (string.IsNullOrWhiteSpace(FriendCode) && !FriendCodeFilter.IsPlaceholder(claimedFriendCode))
+            {
+                FriendCode = claimedFriendCode;
+            }
+
+            if (string.IsNullOrWhiteSpace(Puid) && !string.IsNullOrWhiteSpace(claimedPuid))
+            {
+                Puid = claimedPuid;
+            }
 
             return ValueTask.CompletedTask;
         }

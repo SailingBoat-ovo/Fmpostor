@@ -18,6 +18,45 @@ namespace Fmpostor.Server.WebAdmin;
 /// </summary>
 internal static class JsonLines
 {
+    /// <summary>
+    ///     Parses JSONL text (one entry per line), skipping blank and malformed lines.
+    /// </summary>
+    /// <remarks>
+    ///     用于"混合文件"的尾部: 已经知道这段只有逐行条目, 不需要再猜格式。
+    /// </remarks>
+    public static List<T> Parse<T>(string text, JsonSerializerOptions options)
+    {
+        var result = new List<T>();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return result;
+        }
+
+        foreach (var line in text.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                var entry = JsonSerializer.Deserialize<T>(trimmed, options);
+                if (entry != null)
+                {
+                    result.Add(entry);
+                }
+            }
+            catch (JsonException)
+            {
+                // A torn write can leave one bad line; skip it rather than losing the file.
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Reads entries from a JSONL file or a legacy JSON-array file.</summary>
     public static List<T> Read<T>(string path, JsonSerializerOptions options)
     {

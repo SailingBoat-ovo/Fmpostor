@@ -1,4 +1,5 @@
 using System;
+using Fmpostor.Api.Innersloth;
 
 namespace Fmpostor.Api.Net.Messages.S2C
 {
@@ -26,15 +27,9 @@ namespace Fmpostor.Api.Net.Messages.S2C
 
                 if (writepuid)
                 {
-                    // Filter placeholder friend codes (same as friend's code)
-                    var friendCode = ply.Client.FriendCode;
-                    if (friendCode == "kidcode#8888" || friendCode == "nocode#9999" || friendCode == "unchecked#0001")
-                    {
-                        friendCode = string.Empty;
-                    }
-
-                    writer.Write(ply.Client.Puid);
-                    writer.Write(friendCode);
+                    // 占位代码(含取码失败时的 failauth#xxxx)不下发给客户端。
+                    writer.Write(ply.Client.Puid ?? string.Empty);
+                    writer.Write(FriendCodeFilter.ForClients(ply.Client.FriendCode));
                 }
             }
 

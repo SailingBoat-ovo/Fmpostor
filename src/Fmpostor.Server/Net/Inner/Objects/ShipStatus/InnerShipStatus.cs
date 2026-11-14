@@ -79,12 +79,39 @@ namespace Fmpostor.Server.Net.Inner.Objects.ShipStatus
                 case RpcCalls.CloseDoorsOfType:
                 {
                     if (!await ValidateCmd(call, sender, target) ||
-                        !await ValidateImpostor(call, sender, sender.Character!.PlayerInfo))
+                        !await ValidateImpostor(call, sender, sender.Character?.PlayerInfo))
                     {
                         return false;
                     }
 
                     Rpc27CloseDoorsOfType.Deserialize(reader, out var systemType);
+                    break;
+                }
+
+                // Among Us 19.0: the Spirit Guide ("Influencer") sends a message to the
+                // living crew. The payload is a byte array of images, and the game only
+                // allows 1..3 of them; anything else is rejected as cheating.
+                case RpcCalls.SpiritGuideMessage:
+                {
+                    if (!await ValidateTarget(call, sender, target) ||
+                        !await ValidateRole(call, sender, sender.Character?.PlayerInfo, RoleTypes.SpiritGuide))
+                    {
+                        return false;
+                    }
+
+                    Rpc67SpiritGuideMessage.Deserialize(reader, out var images);
+
+                    if (images.Length == 0 || images.Length > 3)
+                    {
+                        if (await sender.Client.ReportCheatAsync(
+                            call,
+                            CheatCategory.ItemLimits,
+                            $"Client sent {images.Length} images (allowed: 1, 2 or 3)"))
+                        {
+                            return false;
+                        }
+                    }
+
                     break;
                 }
 

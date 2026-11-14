@@ -20,15 +20,9 @@ namespace Fmpostor.Api.Net.Messages.S2C
             player.Client.PlatformSpecificData.Serialize(writer);
             writer.WritePacked(player.Character?.PlayerInfo?.PlayerLevel ?? 1);
 
-            // Filter placeholder friend codes (same as friend's code)
-            var friendCode = player.Client.FriendCode;
-            if (friendCode == "kidcode#8888" || friendCode == "nocode#9999" || friendCode == "unchecked#0001")
-            {
-                friendCode = string.Empty;
-            }
-
-            writer.Write(player.Client.Puid);
-            writer.Write(friendCode);
+            // 占位代码(含取码失败时的 failauth#xxxx)不下发给客户端。
+            writer.Write(player.Client.Puid ?? string.Empty);
+            writer.Write(FriendCodeFilter.ForClients(player.Client.FriendCode));
             writer.EndMessage();
         }
 

@@ -34,6 +34,16 @@ namespace Fmpostor.Server.Net.State
         {
             if (TryGetPlayer(id, out var player))
             {
+                // Never write to a connection that is gone: Hazel's SendAsync throws
+                // InvalidOperationException when the connection is not connected, and
+                // with the reconnect grace period a disconnected player deliberately
+                // stays in _players for a while. (The broadcast paths already filter
+                // this out through GetConnections.)
+                if (player.Client.Connection == null || !player.Client.Connection.IsConnected)
+                {
+                    return;
+                }
+
                 await player.Client.Connection.SendAsync(writer);
             }
         }

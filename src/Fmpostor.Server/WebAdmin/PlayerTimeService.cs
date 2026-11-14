@@ -48,6 +48,11 @@ public class PlayerTimeService : IEventListener, IHostedService
     // friend code -> session start
     private readonly Dictionary<string, DateTime> _sessions = new();
 
+    // friend code -> 本次进房之前的状态(上次登录时间 / 是否第一次来)。
+    //   进房时 AddPlayer 会立刻把"上次登录"改成现在, 而欢迎语是在身体生成之后才发的 ——
+    //   不先记下旧值的话, 欢迎语里的"上次登录"永远是此刻、"距上次登录"永远是"刚刚"。
+    private readonly Dictionary<string, (DateTime? PreviousLogin, bool FirstVisit)> _joinInfo = new();
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -146,11 +151,14 @@ public class PlayerTimeService : IEventListener, IHostedService
         lock (_lock)
         {
             TryReload();
-            if (!_store.Players.TryGetValue(key, out var entry))
+            var existed = _store.Players.TryGetValue(key, out var entry);
+            if (!existed || entry == null)
             {
                 entry = new PlayerTimeEntry { FriendCode = key };
                 _store.Players[key] = entry;
             }
+
+            _joinInfo[key] = (existed ? entry.LastLoginTime : null, !existed);
 
             entry.PlayerName = player.Client.Name ?? entry.PlayerName;
             entry.LastLoginTime = now;
@@ -166,6 +174,8 @@ public class PlayerTimeService : IEventListener, IHostedService
         lock (_lock)
         {
             TryReload();
+            _joinInfo.Remove(key);
+
             if (_sessions.Remove(key, out var start))
             {
                 var minutes = (int)Math.Round((DateTime.UtcNow - start).TotalMinutes);
@@ -215,6 +225,31 @@ public class PlayerTimeService : IEventListener, IHostedService
                     TotalPlayTimeMinutes = entry.TotalPlayTimeMinutes,
                 }
                 : null;
+        }
+    }
+
+    /// <summary>
+    ///     欢迎语用的玩家资料: "上次登录"是【本次进房之前】的那一次; 另外告诉调用方这是不是第一次来。
+    ///     没有进房记录时(例如服务端刚重启)退回当前资料。
+    /// </summary>
+    public (PlayerTimeEntry? Data, bool FirstVisit) GetWelcomeData(IClientPlayer player)
+    {
+        var data = GetPlayerData(player);
+        var key = GetKey(player);
+
+        lock (_lock)
+        {
+            if (!_joinInfo.TryGetValue(key, out var info))
+            {
+                return (data, data == null);
+            }
+
+            if (data != null && info.PreviousLogin.HasValue)
+            {
+                data.LastLoginTime = info.PreviousLogin.Value;
+            }
+
+            return (data, info.FirstVisit);
         }
     }
 

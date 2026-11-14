@@ -23,7 +23,7 @@ namespace Fmpostor.Server.WebAdmin;
 public class UpdateService
 {
     private const string Repo = "SailingBoat-ovo/Fmpostor";
-    private const string CurrentVersion = "Turbo-650.0-20260905";
+    private const string CurrentVersion = "Turbo-700.0-20261024";
 
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<UpdateService> _logger;
@@ -39,7 +39,7 @@ public class UpdateService
     {
         get
         {
-            // "Turbo-650.0-20260905" -> "Turbo-650.0" (strip trailing -YYYYMMDD build stamp)
+            // "Turbo-700.0-20261024" -> "Turbo-700.0" (strip trailing -YYYYMMDD build stamp)
             var m = Regex.Match(CurrentVersion, @"^(.+?)-\d{8}$");
             return m.Success ? m.Groups[1].Value : CurrentVersion;
         }
