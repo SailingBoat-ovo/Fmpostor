@@ -37,6 +37,18 @@ namespace Fmpostor.Server.Net.State
 
         public bool IsHost => Game?.Host == this;
 
+        /// <summary>
+        ///     True while this player's connection is gone but their slot is
+        ///     still reserved for a reconnect (grace period running).
+        /// </summary>
+        public bool Disconnected { get; internal set; }
+
+        /// <inheritdoc />
+        public bool IsAwaitingReconnect => Disconnected;
+
+        /// <inheritdoc />
+        public DateTimeOffset? ReconnectExpiresAt { get; internal set; }
+
         public string? Scene { get; internal set; }
 
         public RuntimePlatform? Platform { get; internal set; }

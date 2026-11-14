@@ -961,7 +961,9 @@ public class RoomMonitorService : IEventListener, IDisposable
         var game = e.Game;
         game.Items[BroadcastEnabledKey] = true;
 
-        _ = SendHostWelcomeAsync(game);
+        // 这里原来会给房主单独推一条硬编码的欢迎消息(内容是 /m off 的说明)。
+        // 那段文案已并入欢迎语列表(WelcomeService)的默认值, 由面板统一维护, 不再在
+        // 代码里重复发送 —— 否则同一句提示会以两条不同来源的消息各发一次。
         return default;
     }
 
@@ -1046,33 +1048,6 @@ public class RoomMonitorService : IEventListener, IDisposable
     public static bool IsBroadcastEnabled(IGame game)
     {
         return game.Items.TryGetValue(BroadcastEnabledKey, out var val) ? val is true : true;
-    }
-
-    private async Task SendHostWelcomeAsync(IGame game)
-    {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(4));
-
-            if (game.GameState == GameStates.Destroyed)
-            {
-                return;
-            }
-
-            var host = game.Host;
-            if (host?.Character == null)
-            {
-                return;
-            }
-
-            const string message = "欢迎加入由帆船服务端驱动的服务器，如果您想使您的房间不在QQ群内被BOT广播，您可以输入：/m off 以关闭此功能，不需要关闭可以忽略此消息！";
-            await host.Character.SendChatToPlayerAsync(message, host.Character);
-            _logger.LogInformation("[RoomMonitor] Sent host welcome to {Code}.", game.Code);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[RoomMonitor] Host welcome failed for {Code}.", game.Code);
-        }
     }
 
     // ========== 订阅功能 ==========

@@ -52,6 +52,24 @@ namespace Fmpostor.Server.Net.Inner.Objects
 
         public byte PlayerId { get; private set; }
 
+        /// <summary>
+        ///     Reconnect support: assigns the in-game player id to a character object.
+        /// </summary>
+        /// <remarks>
+        ///     ⚠️ The server no longer builds characters (InnerPlayerControl.SerializeAsync
+        ///     is deliberately unimplemented, so any server-side spawn of a character
+        ///     throws), therefore this helper currently has no caller: the body is
+        ///     created by the host client. It is kept because the id has to match the
+        ///     reserved slot whenever something else ends up creating a body: our own
+        ///     reserve path resolves the PlayerInfo through <c>control.PlayerId</c>, so a
+        ///     body left at the default byte.MaxValue could never reserve a slot on a
+        ///     later disconnect.
+        /// </remarks>
+        internal void SetPlayerIdForResume(byte playerId)
+        {
+            PlayerId = playerId;
+        }
+
         public InnerPlayerPhysics Physics { get; }
 
         public InnerCustomNetworkTransform NetworkTransform { get; }
@@ -392,7 +410,7 @@ namespace Fmpostor.Server.Net.Inner.Objects
                     }
                     else
                     {
-                        if (role is RoleTypes.ImpostorGhost or RoleTypes.CrewmateGhost or RoleTypes.GuardianAngel)
+                        if (role is RoleTypes.ImpostorGhost or RoleTypes.CrewmateGhost or RoleTypes.GuardianAngel or RoleTypes.SpiritGuide)
                         {
                             PlayerInfo.RoleWhenAlive = PlayerInfo.RoleType;
                             PlayerInfo.IsDead = true;
@@ -401,9 +419,34 @@ namespace Fmpostor.Server.Net.Inner.Objects
                         PlayerInfo.RoleType = role;
                     }
 
-                    if (Game.GameState == GameStates.Starting && Game.Players.All(clientPlayer => clientPlayer.Character?.PlayerInfo?.RoleType != null))
+                    // 只统计"已经有身体"的玩家。
+                    //
+                    // 原来的条件要求【每一个】玩家都有 Character 且已分配职业。但掉线保槽
+                    // 中的连接没有 Character(它的身体要等重连成功或宽限期到期才处理), 而
+                    // Game.Players 仍然包含它 —— 于是这个 All(...) 永远不成立, 对局就卡在
+                    // Starting 出不来。表现是: 所有人都进了对局, 但服务端状态一直是 Starting,
+                    // 新玩家提示"房间已开始"、观战准入(要求 Started)也永远不放行。
+                    //
+                    // 观战者同样不计入: 它们只有在对局 Started 之后才会被准入。
+                    var bodyOwners = Game.Players.Where(clientPlayer => clientPlayer.Character != null).ToArray();
+
+                    if (Game.GameState == GameStates.Starting
+                        && bodyOwners.Length > 0
+                        && bodyOwners.All(clientPlayer => clientPlayer.Character!.PlayerInfo?.RoleType != null))
                     {
                         await Game.StartedAsync();
+                    }
+                    else if (Game.GameState == GameStates.Starting)
+                    {
+                        // 还差点什么就把"差的是谁"打出来, 否则这种卡死完全无从下手。
+                        var pending = Game.Players
+                            .Where(p => p.Character?.PlayerInfo?.RoleType == null)
+                            .Select(p => $"{p.Client.Name}(clientId {p.Client.Id}, {(p.Character == null ? "无身体/保槽中" : "未分配职业")})");
+
+                        _logger.LogInformation(
+                            "{Code} - SetRole 已处理, 但对局仍停在 Starting, 等待: {Pending}",
+                            Game.Code.Code,
+                            string.Join(", ", pending));
                     }
 
                     break;

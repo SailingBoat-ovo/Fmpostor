@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Net;
 using System.Threading.Tasks;
 using Fmpostor.Api.Innersloth;
@@ -46,6 +46,19 @@ namespace Fmpostor.Api.Games
         /// Vanilla Among Us does not request this, but certain client-side mods will.
         /// </remarks>
         bool IsHostAuthoritive { get; }
+
+        /// <summary>
+        ///     Gets a value indicating whether this game currently honours the
+        ///     disconnect-reconnect grace period, i.e. the feature is enabled
+        ///     and a round is in progress.
+        /// </summary>
+        bool IsReconnectArmed { get; }
+
+        /// <summary>
+        ///     Gets the number of dropped players whose slot is still reserved
+        ///     for a reconnect.
+        /// </summary>
+        int ReconnectReservedSlots { get; }
 
         IClientPlayer? GetClientPlayer(int clientId);
 

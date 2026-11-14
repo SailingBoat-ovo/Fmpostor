@@ -26,6 +26,7 @@ public class WebAdminController : ControllerBase
     private readonly WelcomeService _welcome;
     private readonly ReportService _reportService;
     private readonly PlayerLogService _playerLogs;
+    private readonly ReconnectLogService _reconnectLogs;
     private readonly PlayerStatsService _playerStats;
     private readonly CustomGameCodeService _gameCodes;
     private readonly WebAdminSettingsService _settingsService;
@@ -43,7 +44,7 @@ public class WebAdminController : ControllerBase
     private readonly UpdateService _update;
     private readonly ILogger<WebAdminController> _logger;
 
-    private static readonly string PluginVersion = "Turbo-650.0-20260905";
+    private static readonly string PluginVersion = "Turbo-700.0-20261024";
 
     public WebAdminController(
         GameTrackerService tracker,
@@ -57,6 +58,7 @@ public class WebAdminController : ControllerBase
         WelcomeService welcome,
         ReportService reportService,
         PlayerLogService playerLogs,
+        ReconnectLogService reconnectLogs,
         PlayerStatsService playerStats,
         CustomGameCodeService gameCodes,
         WebAdminSettingsService settingsService,
@@ -85,6 +87,7 @@ public class WebAdminController : ControllerBase
         _welcome = welcome;
         _reportService = reportService;
         _playerLogs = playerLogs;
+        _reconnectLogs = reconnectLogs;
         _playerStats = playerStats;
         _gameCodes = gameCodes;
         _settingsService = settingsService;
@@ -249,6 +252,8 @@ public class WebAdminController : ControllerBase
                 p.IsConnected,
                 p.Limbo,
                 PingMs = p.PingMs,
+                pingIsUpperBound = p.PingIsUpperBound,
+                pingExact = p.PingIsExact,
                 DeltaPort = p.DeltaPort,
                 p.GameVersion,
                 p.Platform,
@@ -999,6 +1004,8 @@ public class WebAdminController : ControllerBase
             success = true,
             enabled = snapshot.Enabled,
             messages = snapshot.Messages,
+            delaySeconds = snapshot.DelaySeconds,
+            newPlayerMessage = snapshot.NewPlayerMessage,
         });
     }
 
@@ -1074,7 +1081,13 @@ public class WebAdminController : ControllerBase
         try
         {
             bool? enabled = body.TryGetProperty("enabled", out var e) ? e.GetBoolean() : null;
-            _welcome.UpdateSettings(enabled);
+            int? delaySeconds = body.TryGetProperty("delaySeconds", out var ds) && ds.ValueKind == JsonValueKind.Number
+                ? ds.GetInt32()
+                : null;
+            string? newPlayerMessage = body.TryGetProperty("newPlayerMessage", out var np) && np.ValueKind == JsonValueKind.String
+                ? np.GetString()
+                : null;
+            _welcome.UpdateSettings(enabled, delaySeconds, newPlayerMessage);
             return Ok(new { success = true, message = "Welcome settings updated." });
         }
         catch (Exception ex)
@@ -1175,6 +1188,110 @@ public class WebAdminController : ControllerBase
 
         var logs = await _playerLogs.GetLogsAsync(type, search, Math.Clamp(limit, 1, 2000));
         return Ok(new { success = true, logs });
+    }
+
+    // ========== Reconnect (disconnect / resume) API ==========
+
+    /// <summary>
+    /// GET /webadmin/api/reconnect/logs
+    /// Filters: event (reserved|resumed|expired|failed), gameCode, search, limit.
+    /// </summary>
+    [HttpGet("api/reconnect/logs")]
+    public async Task<IActionResult> GetReconnectLogs(
+        [FromQuery] string? @event = null,
+        [FromQuery] string? gameCode = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int limit = 500)
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+
+        var logs = await _reconnectLogs.GetLogsAsync(@event, gameCode, search, Math.Clamp(limit, 1, 2000));
+        return Ok(new { success = true, logs });
+    }
+
+    /// <summary>
+    /// GET /webadmin/api/reconnect/stats
+    /// </summary>
+    [HttpGet("api/reconnect/stats")]
+    public async Task<IActionResult> GetReconnectStats()
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+
+        var stats = await _reconnectLogs.GetStatsAsync();
+        return Ok(new { success = true, stats });
+    }
+
+    /// <summary>
+    /// GET /webadmin/api/reconnect/events
+    /// </summary>
+    [HttpGet("api/reconnect/events")]
+    public async Task<IActionResult> GetReconnectEventTypes()
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+
+        var types = await _reconnectLogs.GetEventTypesAsync();
+        return Ok(new { success = true, types });
+    }
+
+    /// <summary>
+    /// GET /webadmin/api/reconnect/current
+    /// Live view: which rooms honour the grace period right now, and which
+    /// players are waiting to come back.
+    /// </summary>
+    [HttpGet("api/reconnect/current")]
+    public IActionResult GetReconnectCurrent()
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+
+        var rooms = _tracker.GetGames()
+            .Where(g => g.ReconnectArmed || g.ReconnectReservedSlots > 0 || g.Players.Any(p => p.IsAwaitingReconnect))
+            .Select(g => new
+            {
+                g.Code,
+                g.DisplayName,
+                g.GameState,
+                g.PlayerCount,
+                g.HostName,
+                reconnectArmed = g.ReconnectArmed,
+                reservedSlots = g.ReconnectReservedSlots,
+                awaiting = g.Players.Where(p => p.IsAwaitingReconnect).Select(p => new
+                {
+                    p.PlayerName,
+                    p.FriendCode,
+                    p.ProductUserId,
+                    p.IpAddress,
+                    p.ReconnectExpiresAt,
+                    p.ReconnectSecondsLeft,
+                }),
+            })
+            .ToList();
+
+        return Ok(new { success = true, rooms });
+    }
+
+    /// <summary>
+    /// POST /webadmin/api/reconnect/clear
+    /// </summary>
+    [HttpPost("api/reconnect/clear")]
+    public async Task<IActionResult> ClearReconnectLogs()
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+
+        if (!_auth.IsAdmin(sessionUser))
+            return StatusCode(403, new { success = false, message = "Admin only." });
+
+        await _reconnectLogs.ClearAsync();
+        return Ok(new { success = true });
     }
 
     /// <summary>

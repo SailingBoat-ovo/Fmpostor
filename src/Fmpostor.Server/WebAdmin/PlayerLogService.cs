@@ -66,14 +66,56 @@ public class PlayerLogService
 
             try
             {
-                // Turbo-650: the store is append-only JSONL; the legacy format was a
-                // single { logs: [...] } object — both are accepted on load.
+                // Turbo-650: the store became append-only JSONL; the legacy format was a
+                // single { "logs": [...] } object. Both start with '{', so the format is
+                // decided structurally: only the legacy wrapper has a "logs" key directly
+                // after the opening brace (a JSONL line starts with the entry's own first
+                // property, e.g. {"time":...}). Never decide on the first character alone.
                 var text = File.ReadAllText(_filePath).TrimStart();
-                List<PlayerLogEntry>? logs;
-                if (text.Length > 0 && text[0] == '{')
+                List<PlayerLogEntry>? logs = null;
+
+                // 文件可能是三种状态之一, 必须都吃得下:
+                //   ① 纯旧格式: { "logs": [...] }
+                //   ② 纯 JSONL: 每行一条
+                //   ③ 【混合】: 旧格式整体 + 之后追加的 JSONL 行
+                //      —— 这种最容易被忽略: 前半段是完整对象, 后半段是新增的行。
+                //      单独按旧格式解析会在尾部报 "invalid after a single JSON value";
+                //      单独按 JSONL 逐行解析又会在开头的多行对象上失败。
+                if (LooksLikeLegacyWrapper(text))
                 {
-                    var data = JsonSerializer.Deserialize<PlayerLogStoreData>(text, JsonOptions);
-                    logs = data?.Logs;
+                    try
+                    {
+                        var data = JsonSerializer.Deserialize<PlayerLogStoreData>(text, JsonOptions);
+                        logs = data?.Logs;
+                    }
+                    catch (JsonException)
+                    {
+                        // 尾部还有追加的行: 找到对象闭合的位置, 前半段按旧格式解析,
+                        // 剩下的部分按 JSONL 逐行解析, 两者合并。
+                        var split = FindEndOfFirstJsonObject(text);
+                        if (split > 0)
+                        {
+                            var head = text[..split];
+                            var tail = text[split..];
+
+                            var data = JsonSerializer.Deserialize<PlayerLogStoreData>(head, JsonOptions);
+                            logs = data?.Logs ?? new List<PlayerLogEntry>();
+
+                            foreach (var extra in JsonLines.Parse<PlayerLogEntry>(tail, JsonOptions))
+                            {
+                                logs.Add(extra);
+                            }
+
+                            _logger.LogInformation(
+                                "[PlayerLog] Recovered mixed legacy+JSONL store: {Legacy} legacy + {Extra} appended entries.",
+                                data?.Logs?.Count ?? 0,
+                                logs.Count - (data?.Logs?.Count ?? 0));
+                        }
+                        else
+                        {
+                            throw;
+                        }
+                    }
                 }
                 else
                 {
@@ -91,6 +133,83 @@ public class PlayerLogService
                 _logger.LogWarning(ex, "[PlayerLog] Failed to load {File}.", _filePath);
             }
         }
+    }
+
+    /// <summary>
+    ///     Returns the index just past the closing brace of the first top-level JSON
+    ///     object in <paramref name="text" />, or 0 when it cannot be determined.
+    /// </summary>
+    /// <remarks>
+    ///     用于修复"旧格式整体 + 其后追加的 JSONL"这种混合文件: 找到第一个完整对象的
+    ///     结尾, 前半段按旧格式解析, 后半段按 JSONL 解析。字符串里的花括号与转义会被跳过,
+    ///     因此不会在 "detail": "{...}" 这类内容上误判。
+    /// </remarks>
+    private static int FindEndOfFirstJsonObject(string text)
+    {
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (ch == '\\')
+                {
+                    escaped = true;
+                }
+                else if (ch == '"')
+                {
+                    inString = false;
+                }
+
+                continue;
+            }
+
+            switch (ch)
+            {
+                case '"':
+                    inString = true;
+                    break;
+
+                case '{':
+                case '[':
+                    depth++;
+                    break;
+
+                case '}':
+                case ']':
+                    depth--;
+                    if (depth == 0)
+                    {
+                        return i + 1;
+                    }
+
+                    break;
+            }
+        }
+
+        return 0;
+    }
+    /// <summary>
+    ///     True when the text is the legacy single-object store ({ "logs": [...] }),
+    ///     false for the current JSONL format (one entry per line).
+    /// </summary>
+    private static bool LooksLikeLegacyWrapper(string text)
+    {
+        if (text.Length == 0 || text[0] != '{')
+        {
+            return false;
+        }
+
+        var span = text.AsSpan(1).TrimStart();
+        return span.StartsWith("\"logs\"", StringComparison.Ordinal);
     }
 
     public void Add(string type, string playerName, string friendCode, string puid, string gameCode, string detail = "")

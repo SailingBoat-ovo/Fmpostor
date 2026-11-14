@@ -154,6 +154,10 @@ namespace Fmpostor.Server.Net.Inner.Objects
                     // This would be a nice place to implement an anti cheat.
                     // But for whatever reason host sends VotingComplete before sending his vote.
                     // Also every client executes his own VotingComplete after other client players CastVote rpc, like wtf.
+
+                    // 房主宣布投票结束 = 会议进入收尾。会议界面随后由各客户端本地销毁,
+                    // 不会有销毁消息到服务端, 所以会议闸门以这一条为准。
+                    Game.NoteMeetingClosed("房主宣布投票结束", this);
                     break;
                 }
 
@@ -302,6 +306,9 @@ namespace Fmpostor.Server.Net.Inner.Objects
         private async ValueTask HandleVotingCompleteAsync()
         {
             _timerToken.Cancel();
+
+            // 服务端自己统计出"投票结束": 会议闸门从这一刻开始计缓冲期。
+            Game.NoteMeetingClosed("服务端统计投票结束", this);
 
             foreach (var playerVoteArea in _playerStates)
             {

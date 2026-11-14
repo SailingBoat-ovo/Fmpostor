@@ -26,6 +26,7 @@ public class GameEventHandler : IEventListener
     private readonly WelcomeService _welcome;
     private readonly ReportService _reportService;
     private readonly PlayerLogService _playerLogs;
+    private readonly ReconnectLogService _reconnectLogs;
     private readonly PlayerStatsService _playerStats;
     private readonly ReactorModService _reactorMods;
     private readonly RoomCleanupService _roomCleanup;
@@ -54,7 +55,8 @@ public class GameEventHandler : IEventListener
         "/m on|off - 房主开关QQ群房间广播\n" +
         "/m - 房主推送房间报告到全部启用的QQ群\n" +
         "/m <内容> - 推送房间报告并在本房间下附一次性备注（下次发送不保留）\n" +
-        "/help - 显示本帮助";
+        "/help - 显示本帮助\n" +
+        "提示：房间默认会被BOT广播到QQ群。若不想被广播，输入 /m off 关闭；不需要关闭可忽略此提示。";
 
     // ========== 交互式举报会话（Turbo-640 重做，替代旧 /report <描述> 一段式） ==========
     //
@@ -85,6 +87,7 @@ public class GameEventHandler : IEventListener
         WelcomeService welcome,
         ReportService reportService,
         PlayerLogService playerLogs,
+        ReconnectLogService reconnectLogs,
         PlayerStatsService playerStats,
         ReactorModService reactorMods,
         RoomCleanupService roomCleanup,
@@ -106,6 +109,7 @@ public class GameEventHandler : IEventListener
         _welcome = welcome;
         _reportService = reportService;
         _playerLogs = playerLogs;
+        _reconnectLogs = reconnectLogs;
         _playerStats = playerStats;
         _reactorMods = reactorMods;
         _roomCleanup = roomCleanup;
@@ -272,24 +276,69 @@ public class GameEventHandler : IEventListener
     /// <summary>
     ///     Welcome message is sent when the player's character has actually spawned
     ///     (the Character/PlayerControl is guaranteed to exist at this point).
-    ///     Only in the lobby (NotStarted), mirroring the reference implementation.
+    ///     Only in the lobby (NotStarted).
     /// </summary>
+    /// <remarks>
+    ///     发送前按面板设置延迟若干秒(默认 3 秒): 身体刚生成时客户端聊天框还在初始化,
+    ///     立刻发容易被后续的系统消息刷掉。延迟放在后台执行 —— 事件处理器是在网络消息
+    ///     处理流程里被等待的, 在这里直接等几秒会拖住整个房间的消息处理。
+    /// </remarks>
     [EventListener]
-    public async ValueTask OnPlayerSpawned(IPlayerSpawnedEvent e)
+    public ValueTask OnPlayerSpawned(IPlayerSpawnedEvent e)
     {
         if (e.Game.GameState != GameStates.NotStarted)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
-        var playerName = e.ClientPlayer.Character?.PlayerInfo?.PlayerName ?? e.ClientPlayer.Client.Name;
-        var playerData = _playerTimes.GetPlayerData(e.ClientPlayer);
-        var welcome = _welcome.Pick(playerName, e.Game.Code.Code, playerData);
-        if (welcome != null)
+        // 用"本次进房之前"的登录记录: 进房时已经把上次登录改成了现在。现在就取, 别等延迟。
+        var (playerData, firstVisit) = _playerTimes.GetWelcomeData(e.ClientPlayer);
+
+        var delay = _welcome.DelaySeconds;
+        var control = e.PlayerControl;
+        var clientPlayer = e.ClientPlayer;
+        var game = e.Game;
+        var playerName = clientPlayer.Client.Name ?? string.Empty;
+
+        _ = Task.Run(async () =>
         {
-            await e.PlayerControl.SendChatToPlayerAsync(welcome, e.PlayerControl);
-            _logger.LogInformation("[Welcome] Sent welcome to {Name} in {Code}: {Msg}", playerName, e.Game.Code.Code, welcome);
-        }
+            try
+            {
+                if (delay > 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(delay));
+                }
+
+                // 等待期间玩家可能已经离开, 或者身体已经换了 —— 那就不发。
+                if (clientPlayer.Character != control || clientPlayer.Game != game)
+                {
+                    return;
+                }
+
+                // 名字在等待之后再取: 身体刚生成时游戏内名字常常还是空字符串(不是 null),
+                // 用 ?? 兜底不会生效, 欢迎语里就成了"欢迎  加入"。空的时候退回连接上的名字。
+                var gameName = control.PlayerInfo?.PlayerName;
+                if (!string.IsNullOrWhiteSpace(gameName))
+                {
+                    playerName = gameName;
+                }
+
+                var welcome = _welcome.Pick(playerName, game.Code.Code, firstVisit ? null : playerData, firstVisit);
+                if (welcome == null)
+                {
+                    return;
+                }
+
+                await control.SendChatToPlayerAsync(welcome, control);
+                _logger.LogInformation("[Welcome] Sent welcome to {Name} in {Code} after {Delay}s: {Msg}", playerName, game.Code.Code, delay, welcome);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Welcome] Failed to send the welcome message to {Name}.", playerName);
+            }
+        });
+
+        return ValueTask.CompletedTask;
     }
 
     [EventListener]

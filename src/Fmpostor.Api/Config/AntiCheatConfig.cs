@@ -22,11 +22,15 @@ namespace Fmpostor.Api.Config
 
         public bool EnableNameLimitChecks { get; set; } = true;
 
+        public bool EnableItemLimitChecks { get; set; } = true;
+
         public bool EnableOwnershipChecks { get; set; } = true;
 
         public bool EnableRoleChecks { get; set; } = true;
 
         public bool EnableTargetChecks { get; set; } = true;
+
+        public bool EnableIdentifierChecks { get; set; } = true;
 
         public bool ForbidProtocolExtensions { get; set; } = true;
 

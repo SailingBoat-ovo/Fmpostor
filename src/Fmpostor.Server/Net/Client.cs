@@ -71,6 +71,8 @@ namespace Fmpostor.Server.Net
                 CheatCategory.MustBeHost => _antiCheatConfig.EnableMustBeHostChecks,
                 CheatCategory.ColorLimits => _antiCheatConfig.EnableColorLimitChecks,
                 CheatCategory.NameLimits => _antiCheatConfig.EnableNameLimitChecks,
+                CheatCategory.ItemLimits => _antiCheatConfig.EnableItemLimitChecks,
+                CheatCategory.Identifiers => _antiCheatConfig.EnableIdentifierChecks,
                 CheatCategory.Ownership => _antiCheatConfig.EnableOwnershipChecks,
                 CheatCategory.Role => _antiCheatConfig.EnableRoleChecks,
                 CheatCategory.Target => _antiCheatConfig.EnableTargetChecks,

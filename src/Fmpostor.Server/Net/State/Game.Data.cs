@@ -187,7 +187,16 @@ namespace Fmpostor.Server.Net.State
 
                                 if (!AddNetObject(obj))
                                 {
-                                    _logger.LogTrace("Failed to AddNetObject, it already exists.");
+                                    // 这一个失败会把对象标成 uint.MaxValue, 之后针对它的
+                                    // 所有 RPC 都找不到目标 —— 包括房主的 SetRole, 而对局
+                                    // 只有处理到 SetRole 才会从 Starting 进 Started。
+                                    // 所以这条必须能在默认日志级别看到。
+                                    _logger.LogWarning(
+                                        "{Code} - Failed to register {Type} NetId {NetId} (owner {OwnerId}): it already exists.",
+                                        Code.Code,
+                                        obj.GetType().Name,
+                                        obj.NetId,
+                                        obj.OwnerId);
 
                                     obj.NetId = uint.MaxValue;
                                     break;
@@ -273,6 +282,39 @@ namespace Fmpostor.Server.Net.State
 
                         await SyncServerObjectsAsync(sender);
                         await SpawnPlayerInfoAsync(sender);
+
+                        // 让重连者(以及任何中途加入的连接)拿到完整的玩家资料。
+                        //
+                        // 开启主机权威时 InnerPlayerInfo 由房主客户端生成(OwnerId = 房主),
+                        // 而 SyncServerObjectsAsync 只补发【服务端自有】对象 —— 这些资料因此
+                        // 不会被发出去; 客户端拿不到资料, 会议界面就只能显示没有名字/颜色的
+                        // 默认小人(投票格全是"无信息小绿人")。
+                        // InnerPlayerInfo.SerializeAsync 是本类已实现的(与角色对象不同),
+                        // 可以安全补发; 客户端对已存在的 NetId 有重复生成保护, 重复发送无害。
+                        var playerInfoCount = 0;
+
+                        foreach (var obj in _allObjects.Values)
+                        {
+                            if (obj is InnerPlayerInfo info)
+                            {
+                                await SendObjectSpawnAsync(info, sender.Client.Id);
+                                playerInfoCount++;
+                            }
+                        }
+
+                        // Reconnect: the resumed client has now been given the world,
+                        // which is the first moment a mod-state restore frame can be
+                        // addressed to one of its objects.
+                        _logger.LogInformation(
+                            "[PlayerInfo] 已向 clientId {ClientId} 补发 {Count} 条玩家资料。",
+                            sender.Client.Id,
+                            playerInfoCount);
+
+                        await FlushPendingModStateRestoreAsync(sender.Client.Id);
+
+                        // 观战者: 到这里房主已经建好它的 PlayerInfo, 补生成指令(kind=4)
+                        // 只有此刻发出才能被正确处理 —— 准入时发太早, 会拿不到身体。
+                        await OnSpectatorSceneReadyAsync(sender);
 
                         break;
                     }
@@ -378,6 +420,27 @@ namespace Fmpostor.Server.Net.State
                     {
                         player.Character = control;
                         player.DisableSpawnTimeout();
+
+                        // 角色就位 —— 重连帧(续局信号/状态包)要以这个 PlayerControl 为载体。
+                        //
+                        // ⚠️ 不能在这里立刻发: 此刻服务端还在处理房主发来的生成消息,
+                        //   这条生成消息要等本方法返回后才会转发给其他客户端(包括重连者本人)。
+                        //   立刻发出去的帧会比"生成"先到, 重连者本地还没有这个对象, 帧被静默丢弃,
+                        //   而服务端已经把它记成"已发送"、不会再发 —— 表现为"服务器没有找到你的
+                        //   保留位置、职业和任务都没恢复"。所以稍等片刻, 让生成消息先送达。
+                        var readyClientId = control.OwnerId;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await Task.Delay(CharacterReadyDelayMs);
+                                await OnCharacterReadyAsync(readyClientId, "character");
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Reconnect: character-ready hand-off failed for client {ClientId}.", readyClientId);
+                            }
+                        });
                     }
                     else
                     {
@@ -403,12 +466,25 @@ namespace Fmpostor.Server.Net.State
 
                 case InnerMeetingHud meetingHud:
                 {
+                    // 会议开始: 关闭对局中途加入的入口(见 Game.MeetingGate.cs)。
+                    NoteMeetingHudSpawned(meetingHud);
+
+                    // Character is NULLABLE here - the '!' that used to be on this line
+                    // was a latent server crash. A connection can legitimately be in the
+                    // room without a body yet (a reconnecting player whose slot is
+                    // reserved). Meeting start walks EVERY player, so one body-less
+                    // connection took the whole server down.
                     foreach (var player in _players.Values)
                     {
-                        if (GameNet.ShipStatus != null)
+                        var character = player.Character;
+                        if (character == null || GameNet.ShipStatus == null)
                         {
-                            await player.Character!.NetworkTransform.SetPositionAsync(player, GameNet.ShipStatus.GetSpawnLocation(player.Character, PlayerCount, false));
+                            continue;
                         }
+
+                        await character.NetworkTransform.SetPositionAsync(
+                            player,
+                            GameNet.ShipStatus.GetSpawnLocation(character, PlayerCount, false));
                     }
 
                     await _eventManager.CallAsync(new MeetingStartedEvent(this, meetingHud));
@@ -423,6 +499,13 @@ namespace Fmpostor.Server.Net.State
         {
             switch (netObj)
             {
+                case InnerMeetingHud destroyedHud:
+                {
+                    // 会议界面关闭(放逐动画随即开始): 缓冲期过后重新放行中途加入。
+                    NoteMeetingHudDestroyed(destroyedHud);
+                    break;
+                }
+
                 case InnerLobbyBehaviour:
                 {
                     GameNet.LobbyBehaviour = null;
@@ -496,6 +579,8 @@ namespace Fmpostor.Server.Net.State
             playerInfo.NetId = _nextNetId++;
             playerInfo.OwnerId = ServerOwned;
             playerInfo.ClientId = sender.Client.Id;
+            playerInfo.FriendCode = sender.Client.FriendCode;
+            playerInfo.Puid = sender.Client.Puid;
             playerInfo.PlayerId = GameNet.GameData.GetNextAvailablePlayerId();
 
             // If player played a previous game, restore their color

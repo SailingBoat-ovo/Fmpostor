@@ -8,6 +8,7 @@ using Fmpostor.Api.Net;
 using Fmpostor.Api.Net.Messages;
 using Impostor.Hazel;
 using Fmpostor.Server.Events;
+using Fmpostor.Server.Net.Reconnect;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +21,7 @@ namespace Fmpostor.Server.Net.State
         public async ValueTask HandleStartGame(IMessageReader message)
         {
             GameState = GameStates.Starting;
+            ResetMeetingWindow();
 
             using var packet = MessageWriter.Get(MessageType.Reliable);
             message.CopyTo(packet);
@@ -41,6 +43,7 @@ namespace Fmpostor.Server.Net.State
             }
 
             GameState = GameStates.Starting;
+            ResetMeetingWindow();
 
             using var packet = MessageWriter.Get(MessageType.Reliable);
             packet.StartMessage(MessageFlags.StartGame);
@@ -52,6 +55,20 @@ namespace Fmpostor.Server.Net.State
 
         public async ValueTask HandleEndGame(IMessageReader message, GameOverReason gameOverReason)
         {
+            // A reserved slot is meaningless once the round ends (and the PlayerInfo
+            // objects are despawned below), so release them before anything else.
+            await ReleaseAllReservedSlotsAsync("round ended");
+
+            // 本局结束: 死亡名册随之失效(下一局是全新生死态)。
+            ResetDeadRoster();
+
+            // 观战名单同样随本局结束清空。
+            ResetSpectators();
+
+            // 会议窗口与未确认的重连都只属于本局。
+            ResetMeetingWindow();
+            ResetUnconfirmedResumes();
+
             GameState = GameStates.Ended;
 
             // Broadcast end of the game.
@@ -87,9 +104,17 @@ namespace Fmpostor.Server.Net.State
             await _eventManager.CallAsync(new GameAlterEvent(this, isPublic));
         }
 
-        public async ValueTask HandleRemovePlayer(int playerId, DisconnectReason reason)
+        public async ValueTask HandleRemovePlayer(int playerId, DisconnectReason reason, bool skipReserve = false)
         {
-            await PlayerRemove(playerId);
+            var deferred = await PlayerRemove(playerId, skipReserve: skipReserve);
+
+            // When the removal was deferred for a possible reconnect, the slot is
+            // still alive: do not announce the leave to the room, otherwise the
+            // clients would tear down a character we are trying to preserve.
+            if (deferred && _players.ContainsKey(playerId))
+            {
+                return;
+            }
 
             // It's possible that the last player was removed, so check if the game is still around.
             if (GameState == GameStates.Destroyed)
@@ -112,7 +137,7 @@ namespace Fmpostor.Server.Net.State
             WriteKickPlayerMessage(message, false, playerId, isBan);
 
             await SendToAllAsync(message);
-            await PlayerRemove(playerId, isBan);
+            await PlayerRemove(playerId, isBan, fromKick: true);
 
             // Remove the player from everyone's game.
             WriteRemovePlayerMessage(
@@ -193,22 +218,55 @@ namespace Fmpostor.Server.Net.State
                 }
             }
 
+            // 会议闸门: 必须在匹配保槽【之前】。匹配会认领保槽, 会议中被放进来的人
+            // 随后会被移出房间, 保槽就白白用掉了(散会再进时职业无法恢复)。
             if (GameState == GameStates.Starting || GameState == GameStates.Started)
+            {
+                var meetingRefusal = CheckMeetingGate(client);
+                if (meetingRefusal != null)
+                {
+                    return meetingRefusal.Value;
+                }
+            }
+
+            // Reconnect gate. A player holding a live reserved slot is allowed
+            // back into a round that already started; everybody else keeps the
+            // original behaviour of being turned away.
+            PendingSlot? resumeSlot = null;
+            var isResume = (GameState == GameStates.Starting || GameState == GameStates.Started)
+                           && TryMatchReconnectSlot(client, out resumeSlot);
+
+            // 判定顺序(重要): 先看保槽(命中 = 重连, 有原职业要恢复); 未命中且对局
+            // 已开始, 才考虑观战。顺序反了会把重连者误判成观战者。
+            var joinAsSpectator = !isResume
+                                  && (GameState == GameStates.Starting || GameState == GameStates.Started)
+                                  && ShouldJoinAsSpectator();
+
+            if ((GameState == GameStates.Starting || GameState == GameStates.Started) && !isResume && !joinAsSpectator)
             {
                 return GameJoinResult.FromError(GameJoinError.GameStarted);
             }
 
+            // From here on the slot (if any) is claimed. Every abort must hand it back,
+            // otherwise the slot and the preserved body stay reserved forever.
+            GameJoinResult AbortResume(GameJoinError error)
+            {
+                resumeSlot?.ReleaseClaim();
+                return GameJoinResult.FromError(error);
+            }
+
             if (GameState == GameStates.Destroyed)
             {
-                return GameJoinResult.FromError(GameJoinError.GameDestroyed);
+                return AbortResume(GameJoinError.GameDestroyed);
             }
 
             // Check if;
             // - The player is already in this game.
             // - The game is full.
-            if (player?.Game != this && _players.Count >= Options.MaxPlayers)
+            // 观战者不占玩家名额, 所以满员检查对它们不适用(观战上限另行判定)。
+            if (!joinAsSpectator && player?.Game != this && _players.Count >= Options.MaxPlayers)
             {
-                return GameJoinResult.FromError(GameJoinError.GameFull);
+                return AbortResume(GameJoinError.GameFull);
             }
 
             var isNew = false;
@@ -219,7 +277,7 @@ namespace Fmpostor.Server.Net.State
 
                 if (!_clientManager.Validate(client))
                 {
-                    return GameJoinResult.FromError(GameJoinError.InvalidClient);
+                    return AbortResume(GameJoinError.InvalidClient);
                 }
 
                 isNew = true;
@@ -230,12 +288,23 @@ namespace Fmpostor.Server.Net.State
             // Check current player state.
             if (player.Limbo == LimboStates.NotLimbo)
             {
-                return GameJoinResult.FromError(GameJoinError.InvalidLimbo);
+                return AbortResume(GameJoinError.InvalidLimbo);
             }
 
             if (GameState == GameStates.Ended)
             {
+                // The round is over: the reserved slot cannot be used any more, so a
+                // claim taken above must be released instead of leaking.
+                AbortResume(GameJoinError.None);
                 await HandleJoinGameNext(player, isNew);
+                return GameJoinResult.CreateSuccess(player);
+            }
+
+            // A resumed player goes straight back into the running round with
+            // their original slot, instead of being treated as a late joiner.
+            if (isResume && resumeSlot != null)
+            {
+                await HandleJoinGameResume(player, resumeSlot);
                 return GameJoinResult.CreateSuccess(player);
             }
 
@@ -248,6 +317,13 @@ namespace Fmpostor.Server.Net.State
             }
 
             await HandleJoinGameNew(player, isNew);
+
+            // 全新玩家加入已开始的对局: 走观战路径(中立观战职业 + 固定为灵魂)。
+            if (joinAsSpectator)
+            {
+                await AdmitAsSpectatorAsync(player);
+            }
+
             return GameJoinResult.CreateSuccess(player);
         }
 

@@ -27,15 +27,17 @@ namespace Fmpostor.Server.Net.Manager
         private readonly IClientFactory _clientFactory;
         private readonly PlayerIdentityService _identityService;
         private readonly DeltaPortPoolService _portPool;
+        private readonly LatencyProbeService _latencyProbe;
         private int _idLast;
 
-        public ClientManager(ILogger<ClientManager> logger, IEventManager eventManager, IClientFactory clientFactory, ICompatibilityManager compatibilityManager, IOptions<CompatibilityConfig> compatibilityConfig, PlayerIdentityService identityService, DeltaPortPoolService portPool)
+        public ClientManager(ILogger<ClientManager> logger, IEventManager eventManager, IClientFactory clientFactory, ICompatibilityManager compatibilityManager, IOptions<CompatibilityConfig> compatibilityConfig, PlayerIdentityService identityService, DeltaPortPoolService portPool, LatencyProbeService latencyProbe)
         {
             _logger = logger;
             _eventManager = eventManager;
             _clientFactory = clientFactory;
             _identityService = identityService;
             _portPool = portPool;
+            _latencyProbe = latencyProbe;
             _clients = new ConcurrentDictionary<int, ClientBase>();
             _compatibilityManager = compatibilityManager;
             _compatibilityConfig = compatibilityConfig.Value;
@@ -184,6 +186,10 @@ namespace Fmpostor.Server.Net.Manager
             _logger.LogTrace("Client connected.");
             _clients.TryAdd(id, client);
 
+            // 让延迟探测知道该测这个地址。ICMP 的结果比 Hazel 的平滑值精确
+            // (Hazel 的 AveragePingMs 被 Math.Max(50,...) 钳住, 显示不出 50 以下)。
+            _latencyProbe.Track(connection.EndPoint.Address);
+
             await _eventManager.CallAsync(new ClientConnectedEvent(connection, client));
         }
 
@@ -191,6 +197,10 @@ namespace Fmpostor.Server.Net.Manager
         {
             _logger.LogTrace("Client disconnected.");
             _clients.TryRemove(client.Id, out _);
+
+            // 停止对这个地址的探测。注意: 同一 IP 可能还有另一个连接,
+            // 那种情况下探测结果被移除也只会让面板回退到 Hazel 的值, 不影响正确性。
+            _latencyProbe.Untrack(client.Connection?.EndPoint?.Address);
 
             // Return the delta port lease so the port can be reused.
             if (client.Items.TryGetValue("DeltaPort", out var portObj) && portObj is int port && port > 0)

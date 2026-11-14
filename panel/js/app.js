@@ -1,6 +1,6 @@
 /* ============================================
    帆船 Impostor Server 管理面板 - App
-   Version: Turbo-650.0-20260905
+   Version: Turbo-700.0-20261024
    安全加固：esc() 属性安全化、Agent 操作确认与消毒、
    默认 HTTPS、密码强度、XSS 字段转义补全
    ============================================ */
@@ -219,6 +219,7 @@ function switchTab(name) {
   if (name === 'connect') refreshConnLogList();
   if (name === 'reports') loadReports();
   if (name === 'behaviors') loadBehaviorTypes();
+  if (name === 'reconnect') loadReconnectAll();
   if (name === 'filter' && state.role === 'admin') loadFilterStats();
   if (name === 'stats') loadStats();
   if (name === 'codes') loadCodes();
@@ -306,9 +307,17 @@ function renderPlayers(pl) {
   state.selectedPlayers.forEach(id => { if (!valid.has(id)) state.selectedPlayers.delete(id); });
   tb.innerHTML = pl.map(p => {
     const checked = state.selectedPlayers.has(p.clientId) ? 'checked' : '';
-    const ping = p.pingMs > 0
-      ? '<span style="color:' + (p.pingMs < 80 ? '#22c55e' : p.pingMs < 150 ? '#f59e0b' : '#ef4444') + ';font-weight:600;">' + p.pingMs + ' ms</span>'
-      : '-';
+    // 延迟：直接显示数值本身（与历史版本一致的呈现方式）。
+    //   · 服务端优先给 ICMP 实测值（1ms 精度，0 也是合法值）→ 显示 "3 ms"
+    //   · ICMP 不可用时退回 Hazel 的估算值 → 显示 "50 ms"（数值本身即下限）
+    //   · 完全没有采样 → "-"
+    // 不在文案上标注 "≥" 之类：那样会把一个正常数值变成"看起来坏掉了"的提示。
+    // 数据来源放在 title 里，需要时悬停可查。
+    const hasPing = p.pingMs !== null && p.pingMs !== undefined && (p.pingMs > 0 || p.pingExact);
+    const pingSource = p.pingExact ? 'ICMP 实测往返延迟' : 'Hazel 估算值（下限 50ms）';
+    const ping = hasPing
+      ? '<span style="color:' + (p.pingMs < 80 ? '#22c55e' : p.pingMs < 150 ? '#f59e0b' : '#ef4444') + ';font-weight:600;" title="' + pingSource + '">' + p.pingMs + ' ms</span>'
+      : '<span style="color:var(--text-muted);" title="暂无可用延迟采样，或该连接已断开（正在保槽等待重连）">-</span>';
     const port = p.deltaPort > 0
       ? '<span style="font-family:monospace;font-size:12px;color:var(--accent);font-weight:600;" title="Delta 专属端口">' + p.deltaPort + '</span>'
       : '<span style="color:var(--text-muted);font-size:12px;">-</span>';
@@ -1035,6 +1044,8 @@ async function loadWelcomeSettings() {
   const d = await api('GET', '/api/welcome');
   if (!d || !d.success) return;
   $('welcomeEnabled').value = d.enabled ? 'true' : 'false';
+  if ($('welcomeDelay')) $('welcomeDelay').value = (typeof d.delaySeconds === 'number') ? d.delaySeconds : 3;
+  if ($('welcomeNewPlayerMsg')) $('welcomeNewPlayerMsg').value = d.newPlayerMessage || '';
   renderWelcomeMsgs(d.messages || []);
 }
 
@@ -1044,7 +1055,7 @@ function renderWelcomeMsgs(msgs) {
   if (!msgs.length) { box.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">暂无欢迎语</span>'; return; }
   box.innerHTML = msgs.map((m, i) =>
     '<div style="display:flex;align-items:center;gap:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:13px;">' +
-    '<span style="flex:1;">' + esc(m) + '</span><button class="btn btn-xs" style="color:var(--danger);" onclick="removeWelcomeMsg(' + i + ')">✕</button></div>').join('');
+    '<span style="flex:1;white-space:pre-wrap;word-break:break-word;">' + esc(m) + '</span><button class="btn btn-xs" style="color:var(--danger);" onclick="removeWelcomeMsg(' + i + ')">✕</button></div>').join('');
 }
 
 async function addWelcomeMsg() {
@@ -1060,7 +1071,11 @@ async function removeWelcomeMsg(index) {
 }
 
 async function saveWelcomeSettings() {
-  const d = await api('POST', '/api/welcome/settings', { enabled: $('welcomeEnabled').value === 'true' });
+  const body = { enabled: $('welcomeEnabled').value === 'true' };
+  const delay = parseInt(($('welcomeDelay') || {}).value, 10);
+  if (!isNaN(delay)) body.delaySeconds = Math.max(0, Math.min(30, delay));
+  if ($('welcomeNewPlayerMsg')) body.newPlayerMessage = $('welcomeNewPlayerMsg').value;
+  const d = await api('POST', '/api/welcome/settings', body);
   if (d) toast(d.success ? '欢迎语设置已保存' : d.message, d.success ? 'success' : 'error');
 }
 
@@ -1770,6 +1785,45 @@ const AGENT_TOOLS = {
       return { ok: true, summary: '共 ' + list.length + ' 条：' + (list.join('；') || '无') };
     },
   },
+  get_reconnect_logs: {
+    cat: 'query',
+    desc: '查询断线重连事件记录 params:{event?, gameCode?, search?, limit?}（event=reserved/resumed/expired/failed）',
+    run: async (p) => {
+      const qs = new URLSearchParams({ limit: String(p.limit || 100) });
+      if (p.event) qs.set('event', p.event);
+      if (p.gameCode) qs.set('gameCode', p.gameCode);
+      if (p.search) qs.set('search', p.search);
+      const d = await api('GET', '/api/reconnect/logs?' + qs.toString());
+      if (!d || !d.success) return { ok: false, summary: '无法获取重连记录' };
+      const labels = { reserved: '保槽', resumed: '已重连', expired: '已过期', failed: '失败' };
+      const list = (d.logs || []).map(l => l.time + ' [' + (labels[l.event] || l.event) + '] ' + (l.playerName || '-') + (l.friendCode ? '(' + l.friendCode + ')' : '') + ' 房间=' + (l.gameCode || '-') + (l.gapSeconds ? ' 隔' + l.gapSeconds + '秒' : '') + ' ' + (l.detail || ''));
+      return { ok: true, summary: '共 ' + list.length + ' 条：' + (list.join('；') || '无') };
+    },
+  },
+  get_reconnect_current: {
+    cat: 'query',
+    desc: '查看当前正在等待重连的房间与玩家（保槽中）',
+    run: async () => {
+      const d = await api('GET', '/api/reconnect/current');
+      if (!d || !d.success) return { ok: false, summary: '无法获取当前重连状态' };
+      const parts = [];
+      for (const r of (d.rooms || [])) {
+        const aw = (r.awaiting || []).map(p => (p.playerName || '?') + '(' + (p.friendCode || '-') + ', 剩' + (p.reconnectSecondsLeft == null ? '?' : p.reconnectSecondsLeft) + '秒)');
+        parts.push(r.code + '[' + r.gameState + ']' + (aw.length ? ' 等待重连: ' + aw.join(', ') : ' 已启用，无等待'));
+      }
+      return { ok: true, summary: '共 ' + parts.length + ' 个房间：' + (parts.join('；') || '无') };
+    },
+  },
+  get_reconnect_stats: {
+    cat: 'query',
+    desc: '断线重连统计（保槽/成功重连/超时/失败/平均耗时）',
+    run: async () => {
+      const d = await api('GET', '/api/reconnect/stats');
+      if (!d || !d.success) return { ok: false, summary: '无法获取重连统计' };
+      const s = d.stats || {};
+      return { ok: true, summary: '累计：保槽 ' + (s.reserved || 0) + ' 次，成功重连 ' + (s.resumed || 0) + ' 次，超时未归 ' + (s.expired || 0) + ' 次，失败 ' + (s.failed || 0) + ' 次；24 小时：保槽 ' + (s.reservedLast24h || 0) + ' / 重连 ' + (s.resumedLast24h || 0) + '；平均重连耗时 ' + (s.averageGapSeconds || 0) + ' 秒' };
+    },
+  },
   get_player_stats: {
     cat: 'query',
     desc: '获取玩家战绩（场次/胜/负/击杀等）',
@@ -2176,9 +2230,9 @@ const AGENT_TOOLS = {
 
   // ---- 设置类操作（Turbo520） ----
   update_welcome_settings: {
-    desc: '更新欢迎语设置 params:{enabled?}',
+    desc: '更新欢迎语设置 params:{enabled?, delaySeconds?(0~30), newPlayerMessage?(第一次来的玩家用, 空字符串=与老玩家共用)}',
     run: async (p) => {
-      const d = await api('POST', '/api/welcome/settings', pick(p, ['enabled']));
+      const d = await api('POST', '/api/welcome/settings', pick(p, ['enabled', 'delaySeconds', 'newPlayerMessage']));
       return { ok: !!(d && d.success), summary: (d && (d.message || (d.success ? '已保存' : ''))) || '请求失败' };
     },
   },
@@ -2870,4 +2924,151 @@ function pollAfterUpdate() {
     } catch (e) { /* server restarting */ }
     if (n > 100) { clearInterval(timer); toast(t('等待服务端重启超时，请手动刷新页面'), 'warn'); }
   }, 3000);
+}
+
+
+// ============================================================
+// 断线重连（Reconnect）
+// 数据来自服务端 WebAdmin：
+//   GET /api/reconnect/stats    统计
+//   GET /api/reconnect/current  当前等待重连的玩家
+//   GET /api/reconnect/logs     事件记录
+//   GET /api/reconnect/events   事件类型
+// ============================================================
+
+const RECONNECT_EVENT_LABEL = {
+  reserved: ['badge-orange', '保槽'],
+  resumed:  ['badge-green',  '已重连'],
+  expired:  ['badge-red',    '已过期'],
+  failed:   ['badge-red',    '失败'],
+};
+
+function reconnectEventBadge(ev) {
+  const m = RECONNECT_EVENT_LABEL[ev];
+  if (!m) return '<span class="badge">' + esc(ev || '-') + '</span>';
+  return '<span class="badge ' + m[0] + '">' + esc(m[1]) + '</span>';
+}
+
+function fmtLocalTime(v) {
+  if (!v) return '-';
+  try {
+    const dt = new Date(v);
+    if (isNaN(dt.getTime())) return esc(String(v));
+    return dt.toLocaleString();
+  } catch (e) { return esc(String(v)); }
+}
+
+function loadReconnectAll() {
+  loadReconnectStats();
+  loadReconnectCurrent();
+  loadReconnectEvents();
+}
+
+async function loadReconnectStats() {
+  const box = $('reconnectStatsBody');
+  if (!box) return;
+  const d = await api('GET', '/api/reconnect/stats');
+  if (!d || !d.success) {
+    box.innerHTML = '<div class="empty-state"><h3>无法获取重连统计</h3></div>';
+    return;
+  }
+  const s = d.stats || {};
+  const cell = (label, value, hint) =>
+    '<div style="min-width:120px;padding:8px 12px;">' +
+    '<div style="font-size:12px;opacity:.7;">' + esc(label) + '</div>' +
+    '<div style="font-size:22px;font-weight:600;">' + esc(String(value)) + '</div>' +
+    (hint ? '<div style="font-size:11px;opacity:.6;">' + esc(hint) + '</div>' : '') +
+    '</div>';
+  box.innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
+    cell('保槽次数（累计）', s.reserved || 0) +
+    cell('成功重连（累计）', s.resumed || 0) +
+    cell('超时未归（累计）', s.expired || 0) +
+    cell('失败（累计）', s.failed || 0) +
+    cell('保槽（24 小时）', s.reservedLast24h || 0) +
+    cell('重连（24 小时）', s.resumedLast24h || 0) +
+    cell('平均重连耗时', (s.averageGapSeconds || 0) + ' 秒') +
+    '</div>';
+}
+
+async function loadReconnectCurrent() {
+  const tb = $('reconnectCurrentBody');
+  if (!tb) return;
+  const d = await api('GET', '/api/reconnect/current');
+  if (!d || !d.success) {
+    tb.innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>无法获取当前重连状态</h3></div></td></tr>';
+    return;
+  }
+  const rooms = d.rooms || [];
+  const rows = [];
+  for (const r of rooms) {
+    const awaiting = Array.from(r.awaiting || []);
+    if (!awaiting.length) {
+      rows.push('<tr>' +
+        '<td>' + esc(r.code) + '</td>' +
+        '<td><span class="badge badge-green">已启用</span></td>' +
+        '<td colspan="6" style="opacity:.6;">暂无掉线等待重连的玩家</td>' +
+        '</tr>');
+      continue;
+    }
+    for (const p of awaiting) {
+      rows.push('<tr>' +
+        '<td>' + esc(r.code) + '</td>' +
+        '<td><span class="badge badge-orange">等待重连</span></td>' +
+        '<td>' + esc(p.playerName || '-') + '</td>' +
+        '<td>' + esc(p.friendCode || '-') + '</td>' +
+        '<td>' + esc(p.productUserId || '-') + '</td>' +
+        '<td>' + esc(p.ipAddress || '-') + '</td>' +
+        '<td>' + esc(String(p.reconnectSecondsLeft == null ? '-' : p.reconnectSecondsLeft + 's')) + '</td>' +
+        '<td>' + fmtLocalTime(p.reconnectExpiresAt) + '</td>' +
+        '</tr>');
+    }
+  }
+  tb.innerHTML = rows.length
+    ? rows.join('')
+    : '<tr><td colspan="8"><div class="empty-state"><h3>当前没有启用重连的房间</h3></div></td></tr>';
+}
+
+async function loadReconnectEvents() {
+  const d = await api('GET', '/api/reconnect/events');
+  const sel = $('reconnectEventSelect');
+  if (!d || !d.success || !sel) return;
+  const keep = sel.value || 'all';
+  const labels = { reserved: '保槽', resumed: '已重连', expired: '已过期', failed: '失败' };
+  sel.innerHTML = '<option value="all">全部事件</option>' +
+    (d.types || []).map(t => '<option value="' + esc(t) + '">' + esc(labels[t] || t) + '</option>').join('');
+  sel.value = keep;
+  loadReconnectLogs();
+}
+
+async function loadReconnectLogs() {
+  const tb = $('reconnectLogsBody');
+  if (!tb) return;
+  const ev = $('reconnectEventSelect') ? $('reconnectEventSelect').value : 'all';
+  const search = $('reconnectSearch') ? $('reconnectSearch').value.trim() : '';
+  const gameCode = $('reconnectGameCode') ? $('reconnectGameCode').value.trim() : '';
+  const qs = new URLSearchParams({ limit: '500' });
+  if (ev && ev !== 'all') qs.set('event', ev);
+  if (search) qs.set('search', search);
+  if (gameCode) qs.set('gameCode', gameCode);
+  const d = await api('GET', '/api/reconnect/logs?' + qs.toString());
+  if (!d || !d.success) {
+    tb.innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>无法获取重连记录</h3></div></td></tr>';
+    return;
+  }
+  const logs = d.logs || [];
+  if (!logs.length) {
+    tb.innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>暂无记录</h3></div></td></tr>';
+    return;
+  }
+  tb.innerHTML = logs.map(l => '<tr>' +
+    '<td>' + fmtLocalTime(l.time) + '</td>' +
+    '<td>' + reconnectEventBadge(l.event) + '</td>' +
+    '<td>' + esc(l.playerName || '-') + '</td>' +
+    '<td>' + esc(l.friendCode || '-') + '</td>' +
+    '<td>' + esc(l.gameCode || '-') + '</td>' +
+    '<td>' + esc(String(l.playerId == null ? '-' : l.playerId)) + '</td>' +
+    '<td>' + esc(l.gapSeconds ? l.gapSeconds + 's' : '-') + '</td>' +
+    '<td>' + esc(l.detail || '-') + '</td>' +
+    '</tr>').join('');
 }

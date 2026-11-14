@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using Fmpostor.Api.Games;
 using Fmpostor.Api.Net.Inner;
@@ -28,6 +29,19 @@ namespace Fmpostor.Api.Net
         IInnerPlayerControl? Character { get; }
 
         public bool IsHost { get; }
+
+        /// <summary>
+        ///     Gets a value indicating whether this player's connection is gone
+        ///     but the slot is still reserved for a reconnect (grace period
+        ///     running). Always false while the feature is disabled.
+        /// </summary>
+        bool IsAwaitingReconnect { get; }
+
+        /// <summary>
+        ///     Gets the moment the reserved slot expires, or null when the player
+        ///     is not awaiting a reconnect.
+        /// </summary>
+        DateTimeOffset? ReconnectExpiresAt { get; }
 
         /// <summary>
         ///     Checks if the specified <see cref="IInnerNetObject" /> is owned by <see cref="IClientPlayer" />.

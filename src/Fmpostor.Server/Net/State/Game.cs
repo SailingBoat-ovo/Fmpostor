@@ -17,6 +17,8 @@ using Fmpostor.Api.Net.Manager;
 using Fmpostor.Api.Net.Messages.S2C;
 using Fmpostor.Server.Events;
 using Fmpostor.Server.Net.Manager;
+using Fmpostor.Server.Net.Reconnect;
+using Fmpostor.Server.WebAdmin;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -34,6 +36,14 @@ namespace Fmpostor.Server.Net.State
         private readonly ICompatibilityManager _compatibilityManager;
         private readonly CompatibilityConfig _compatibilityConfig;
         private readonly TimeoutConfig _timeoutConfig;
+        private readonly ReconnectConfig _reconnectConfig;
+        private readonly ReconnectLogService _reconnectLogs;
+
+        /// <summary>
+        ///     Server-side registry of players that dropped and may reconnect
+        ///     into their own body within the grace period.
+        /// </summary>
+        internal ReconnectRegistry Reconnect { get; }
 
         public Game(
             ILogger<Game> logger,
@@ -47,7 +57,9 @@ namespace Fmpostor.Server.Net.State
             IEventManager eventManager,
             ICompatibilityManager compatibilityManager,
             IOptions<CompatibilityConfig> compatibilityConfig,
-            IOptions<TimeoutConfig> timeoutConfig)
+            IOptions<TimeoutConfig> timeoutConfig,
+            IOptions<ReconnectConfig> reconnectConfig,
+            ReconnectLogService reconnectLogs)
         {
             _logger = logger;
             _serviceProvider = serviceProvider;
@@ -67,6 +79,9 @@ namespace Fmpostor.Server.Net.State
             _compatibilityManager = compatibilityManager;
             _compatibilityConfig = compatibilityConfig.Value;
             _timeoutConfig = timeoutConfig.Value;
+            _reconnectConfig = reconnectConfig.Value;
+            _reconnectLogs = reconnectLogs;
+            Reconnect = new ReconnectRegistry(_reconnectConfig, logger);
             Items = new ConcurrentDictionary<object, object>();
         }
 
@@ -127,10 +142,18 @@ namespace Fmpostor.Server.Net.State
             {
                 foreach (var player in _players.Values)
                 {
-                    if (GameNet.ShipStatus != null)
+                    // Same nullable trap as the meeting-start walk in Game.Data.cs:
+                    // a reserved (reconnecting) connection has no body yet, and this
+                    // loop covers every player, so the '!' used to crash the server.
+                    var character = player.Character;
+                    if (character == null || GameNet.ShipStatus == null)
                     {
-                        await player.Character!.NetworkTransform.SetPositionAsync(player, GameNet.ShipStatus.GetSpawnLocation(player.Character, PlayerCount, true));
+                        continue;
                     }
+
+                    await character.NetworkTransform.SetPositionAsync(
+                        player,
+                        GameNet.ShipStatus.GetSpawnLocation(character, PlayerCount, true));
                 }
 
                 GameState = GameStates.Started;
@@ -167,3 +190,4 @@ namespace Fmpostor.Server.Net.State
         }
     }
 }
+
