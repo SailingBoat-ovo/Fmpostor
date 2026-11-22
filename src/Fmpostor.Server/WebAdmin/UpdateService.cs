@@ -23,7 +23,7 @@ namespace Fmpostor.Server.WebAdmin;
 public class UpdateService
 {
     private const string Repo = "SailingBoat-ovo/Fmpostor";
-    private const string CurrentVersion = "Max-800.0-20261122";
+    private const string CurrentVersion = "Max-800.1-20261122";
 
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<UpdateService> _logger;

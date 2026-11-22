@@ -25,7 +25,7 @@ public sealed class TokenController : ControllerBase
     // Self-hosted Innersloth gateway. Overridable via config.json
     // (WebAdmin:InnerslothApiBaseUrl) — e.g. switching to an EdgeOne-proxied
     // https:// URL — without recompiling. Legacy hardcoded default below.
-    private const string InnerslothApiBaseUrlDefault = "http://backend.playerinfo.impwm.fcaugame.cn:58080";
+    private const string InnerslothApiBaseUrlDefault = "http://backend.playerinfo.impwm.fcaugame.cn";
 
     private string InnerslothApiBaseUrl =>
         string.IsNullOrWhiteSpace(_webAdminConfig.InnerslothApiBaseUrl)

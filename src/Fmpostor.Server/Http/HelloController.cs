@@ -30,7 +30,7 @@ public sealed class HelloController : ControllerBase
             $"""
             Fmpostor AmongUs server is running normally.
             Thank you for your use and support!
-            Current version: Max-800.0-20261122
+            Current version: Max-800.1-20261122
             ============
             If you need server support, technical assistance, or would like to obtain the open-source address,
             please contact us via email: admin@fanchuanovo.cn

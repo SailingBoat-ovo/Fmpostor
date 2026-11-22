@@ -408,7 +408,7 @@ namespace Fmpostor.Server
         }
 
         /// <summary>Current build version shown in the startup panel and the web panel.</summary>
-        private const string DisplayVersion = "Max-800.0-20261122";
+        private const string DisplayVersion = "Max-800.1-20261122";
 
         /// <summary>
         ///     Prints the startup panel.

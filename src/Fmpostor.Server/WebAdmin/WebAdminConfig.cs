@@ -113,7 +113,7 @@ public class WebAdminConfig
     /// <summary>
     ///     Base URL of the self-hosted Innersloth (friend-code) gateway. When
     ///     empty the built-in default
-    ///     (http://backend.playerinfo.impwm.fcaugame.cn:58080) is used. Set this
+    ///     (http://backend.playerinfo.impwm.fcaugame.cn, port 80) is used. Set this
     ///     to e.g. https://backend.playerinfo.impwm.fcaugame.cn when the gateway
     ///     is fronted by a reverse proxy / CDN such as Tencent EdgeOne.
     /// </summary>

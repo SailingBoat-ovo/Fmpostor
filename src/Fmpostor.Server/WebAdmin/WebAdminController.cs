@@ -44,7 +44,7 @@ public class WebAdminController : ControllerBase
     private readonly UpdateService _update;
     private readonly ILogger<WebAdminController> _logger;
 
-    private static readonly string PluginVersion = "Max-800.0-20261122";
+    private static readonly string PluginVersion = "Max-800.1-20261122";
 
     public WebAdminController(
         GameTrackerService tracker,

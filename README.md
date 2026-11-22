@@ -8,7 +8,7 @@
 
 **帆船的 Impostor 服务端** —— 面向私服运营者的 All-in-one Among Us 服务端。基于 [Impostor](https://github.com/Impostor/Impostor)（GPL-3.0）二次开发，内置 Web 管理面板与全套自动化运营能力。
 
-> 当前版本：**Max-800.0** · 支持 Among Us **19.0** · 完整更新日志见 [CHANGELOG.md](CHANGELOG.md)
+> 当前版本：**Max-800.1** · 支持 Among Us **19.0** · 完整更新日志见 [CHANGELOG.md](CHANGELOG.md)
 
 ### ✨ 核心优势
 
@@ -138,7 +138,11 @@ dotnet publish src/Fmpostor.Server/Fmpostor.Server.csproj -c Release -r linux-x6
 
 ### 📝 更新日志
 
-**Max-800.0-20261122**（最新）
+**Max-800.1-20261122**（最新）
+
+- 🪪 修复好友代码获取：网关地址改用 80 端口（原 58080 端口已不可用）
+
+**Max-800.0-20261122**
 
 - 🔌 断线重连完整版：会议中重连、观战者中途加入、重连后正常结算、结算总结里同一人只显示一次并标注“重连玩家”（需 NebulaResume v2.0）
 - 🍾 一言回归；👥 新命令 `/players`、`/maxplayers`；📢 接入游戏自带举报按钮
@@ -171,7 +175,7 @@ dotnet publish src/Fmpostor.Server/Fmpostor.Server.csproj -c Release -r linux-x6
 
 **Fanchuan's Impostor server**: an all-in-one Among Us server for private-server operators. A fork of [Impostor](https://github.com/Impostor/Impostor) (GPL-3.0) with a built-in web admin panel and a full set of automation for running a community server.
 
-> Current version: **Max-800.0** · supports Among Us **19.0** · full changelog in [CHANGELOG.md](CHANGELOG.md)
+> Current version: **Max-800.1** · supports Among Us **19.0** · full changelog in [CHANGELOG.md](CHANGELOG.md)
 
 ### ✨ Highlights
 
@@ -284,7 +288,11 @@ Reverse-proxy port 443 to the server's port 22023 with Nginx or Caddy; see the u
 
 ### 📝 Changelog
 
-**Max-800.0-20261122** (latest)
+**Max-800.1-20261122** (latest)
+
+- 🪪 Fixed friend-code lookup: the gateway is now reached on port 80 (port 58080 no longer works)
+
+**Max-800.0-20261122**
 
 - 🔌 Reconnect, complete: rejoin during meetings, spectators joining mid-round, normal game end after reconnects, and an end-of-game summary that lists each player once with a "reconnected" tag (needs NebulaResume v2.0)
 - 🍾 Hitokoto is back; 👥 new `/players` and `/maxplayers` commands; 📢 the game's own report button now reaches the panel

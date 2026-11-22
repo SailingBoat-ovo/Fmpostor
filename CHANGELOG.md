@@ -6,6 +6,12 @@
 
 ## 中文
 
+### Max-800.1-20261122
+
+上一版本：Max-800.0-20261122。可在面板「自动更新」一键升级。
+
+- 🪪 修复好友代码获取失败：默认网关地址由 `http://backend.playerinfo.impwm.fcaugame.cn:58080` 改为 `http://backend.playerinfo.impwm.fcaugame.cn`（80 端口）。在 `config.json` 里自己设置过 `WebAdmin:InnerslothApiBaseUrl` 的不受影响。
+
 ### Max-800.0-20261122
 
 上一版本：Turbo-700.0-20261024。700 服务器可在面板「自动更新」一键升级。版本号从 Turbo 系列进入 **Max** 系列。
@@ -180,6 +186,12 @@
 ---
 
 ## English
+
+### Max-800.1-20261122
+
+Previous version: Max-800.0-20261122. Upgrade in one click from the panel's **Auto Update** page.
+
+- 🪪 Fixed friend-code lookups failing: the default gateway address changed from `http://backend.playerinfo.impwm.fcaugame.cn:58080` to `http://backend.playerinfo.impwm.fcaugame.cn` (port 80). Servers that set `WebAdmin:InnerslothApiBaseUrl` in `config.json` themselves are not affected.
 
 ### Max-800.0-20261122
 
