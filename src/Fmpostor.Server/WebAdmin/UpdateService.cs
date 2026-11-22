@@ -23,7 +23,7 @@ namespace Fmpostor.Server.WebAdmin;
 public class UpdateService
 {
     private const string Repo = "SailingBoat-ovo/Fmpostor";
-    private const string CurrentVersion = "Turbo-700.0-20261024";
+    private const string CurrentVersion = "Max-800.0-20261122";
 
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<UpdateService> _logger;
@@ -39,20 +39,20 @@ public class UpdateService
     {
         get
         {
-            // "Turbo-700.0-20261024" -> "Turbo-700.0" (strip trailing -YYYYMMDD build stamp)
+            // "Max-800.0-20261122" -> "Max-800.0" (strip trailing -YYYYMMDD build stamp)
             var m = Regex.Match(CurrentVersion, @"^(.+?)-\d{8}$");
             return m.Success ? m.Groups[1].Value : CurrentVersion;
         }
     }
 
     /// <summary>True only when the latest tag is strictly NEWER than the running tag
-    /// ("Turbo-640.0" &gt; "Turbo-630.0"). Prevents an old release from luring a newer
+    /// ("Max-800.0" &gt; "Turbo-700.0": any letter prefix, compared by number). Prevents an old release from luring a newer
     /// server into a downgrade just because the tags differ.</summary>
     private static bool IsNewerTag(string latest, string current)
     {
         if (string.Equals(latest, current, StringComparison.OrdinalIgnoreCase)) return false;
-        var m1 = Regex.Match(latest ?? "", @"^Turbo-(\d+)(?:\.(\d+))?$", RegexOptions.IgnoreCase);
-        var m2 = Regex.Match(current ?? "", @"^Turbo-(\d+)(?:\.(\d+))?$", RegexOptions.IgnoreCase);
+        var m1 = Regex.Match(latest ?? "", @"^[A-Za-z]+-(\d+)(?:\.(\d+))?$", RegexOptions.IgnoreCase);
+        var m2 = Regex.Match(current ?? "", @"^[A-Za-z]+-(\d+)(?:\.(\d+))?$", RegexOptions.IgnoreCase);
         if (!m1.Success || !m2.Success)
             return true; // non-numeric tags: fall back to "tag differs"
         long a = long.Parse(m1.Groups[1].Value) * 1000 + (m1.Groups[2].Success ? long.Parse(m1.Groups[2].Value) : 0);

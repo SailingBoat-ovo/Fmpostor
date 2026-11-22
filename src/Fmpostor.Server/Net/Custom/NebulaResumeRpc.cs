@@ -73,6 +73,11 @@ namespace Fmpostor.Server.Net.Custom
         internal const int KindResume = 3;
 
         /// <summary>
+        ///     Server -> all: rejoin banner, <c>[16, playerId, nameLen, name..., codeLen, code...]</c>.
+        /// </summary>
+        internal const int KindRejoinNotice = 16;
+
+        /// <summary>
         ///     Frame kind for the spawn directive (S→host). Asks the host to create the
         ///     character for a resumed connection and carries the preserved player id,
         ///     which only the server knows. Payload:
@@ -125,6 +130,14 @@ namespace Fmpostor.Server.Net.Custom
         /// </summary>
         internal const int KindMeetingFlag = 10;
 
+        /// <summary>
+        ///     S→C: a reconnecter admitted while a meeting is running. Payload
+        ///     <c>[KindMeetingSeat, oldGamePlayerId]</c>: until the meeting ends the client
+        ///     votes on behalf of its previous identity (whose vote area is still alive).
+        ///     The normal resume follows after the meeting.
+        /// </summary>
+        internal const int KindMeetingSeat = 13;
+
         /// <summary>Room capability protocol version understood by this server.</summary>
         internal const int ProtocolVersion = 1;
 
@@ -133,6 +146,13 @@ namespace Fmpostor.Server.Net.Custom
 
         /// <summary>Capability flag: the host's mod supports joining a running round as a spectator.</summary>
         internal const int CapabilitySpectator = 2;
+
+        /// <summary>
+        ///     Capability flag: the host's mod copes with players arriving during a meeting
+        ///     (the joiner sits the meeting out on its old identity's seat, resume follows after).
+        ///     Bit 4 is intentionally skipped: an earlier, withdrawn experiment used it.
+        /// </summary>
+        internal const int CapabilityMeetingJoin = 8;
 
         /// <summary>
         ///     Sanity bounds for the declared int count. The real blob is a handful

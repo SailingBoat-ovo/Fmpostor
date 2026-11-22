@@ -27,6 +27,7 @@ public sealed class GamesController : ControllerBase
     private readonly ListingManager _listingManager;
     private readonly HostServer _hostServer;
     private readonly PlayerIdentityService _identityService;
+    private readonly DeltaPortPoolService _portPool;
     private readonly WebAdminConfig _webAdminConfig;
 
     /// <summary>
@@ -35,8 +36,9 @@ public sealed class GamesController : ControllerBase
     /// <param name="gameManager">GameManager containing a list of games.</param>
     /// <param name="listingManager">ListingManager responsible for filtering.</param>
     /// <param name="serverConfig">Fmpostor configuration section containing the public ip address of this server.</param>
-    public GamesController(IGameManager gameManager, ListingManager listingManager, IOptions<ServerConfig> serverConfig, PlayerIdentityService identityService, IOptions<WebAdminConfig> webAdminConfig)
+    public GamesController(IGameManager gameManager, ListingManager listingManager, IOptions<ServerConfig> serverConfig, PlayerIdentityService identityService, DeltaPortPoolService portPool, IOptions<WebAdminConfig> webAdminConfig)
     {
+        _portPool = portPool;
         _gameManager = gameManager;
         _listingManager = listingManager;
         _identityService = identityService;
@@ -50,19 +52,69 @@ public sealed class GamesController : ControllerBase
     ///     token exchange, so the client connects to a dedicated port that exactly
     ///     identifies its auth session. Falls back to the public port.
     /// </summary>
+    /// <remarks>
+    ///     The port is taken from the caller's OWN matchmaking token (sent by every client,
+    ///     vanilla or modded, in the Authorization header), never guessed from the IP:
+    ///     players behind one NAT/CDN address would otherwise be handed each other's port
+    ///     and be identified as each other. The port is only used while its lease is still
+    ///     live and belongs to the token's PUID; in every other case (no token, an old
+    ///     token, pool disabled or exhausted) the client gets the main port and behaves
+    ///     exactly like on a server without delta ports.
+    /// </remarks>
     private ushort GetDeltaPort()
     {
-        var ip = ClientIpHelper.GetClientIp(HttpContext.Request, _webAdminConfig.TrustAllProxies, _webAdminConfig.TrustedProxies);
-        if (!string.IsNullOrEmpty(ip) && IPAddress.TryParse(ip, out var addr))
+        try
         {
-            var identity = _identityService.Lookup(addr);
-            if (identity != null && identity.Port > 0)
+            if (TryReadToken(out var token))
             {
-                return (ushort)identity.Port;
+                var puid = token.Content?.ProductUserId;
+
+                if (token.Port > 0 && _portPool.IsLeasedTo(token.Port, puid))
+                {
+                    return (ushort)token.Port;
+                }
+
+                // Token predates the current lease (e.g. the lease expired and was renewed).
+                var current = _portPool.GetPortFor(puid);
+                if (current > 0)
+                {
+                    return (ushort)current;
+                }
             }
+        }
+        catch
+        {
+            // Unreadable token: fall through to the main port.
         }
 
         return (ushort)_hostServer.Port;
+    }
+
+    private bool TryReadToken([NotNullWhen(true)] out TokenController.Token? token)
+    {
+        token = null;
+        var header = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+        if (string.IsNullOrEmpty(header) || !header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var raw = header["Bearer ".Length..].Trim();
+        if (raw.Length == 0 || raw.Length > 4096)
+        {
+            return false;
+        }
+
+        try
+        {
+            token = JsonSerializer.Deserialize<TokenController.Token>(Convert.FromBase64String(raw));
+        }
+        catch
+        {
+            token = null;
+        }
+
+        return token != null;
     }
 
     /// <summary>

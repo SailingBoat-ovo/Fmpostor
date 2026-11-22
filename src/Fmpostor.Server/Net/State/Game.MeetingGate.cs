@@ -266,12 +266,29 @@ namespace Fmpostor.Server.Net.State
                 return null;
             }
 
+            // 没装断线重连插件的房间(原版 / 其他模组): 不插手, 走原本的"对局已开始"。
+            if (!RoomUsesResume)
+            {
+                return null;
+            }
+
             var identityKey = ReconnectRegistry.BuildIdentityKey(client.Puid, client.FriendCode, client.Name);
             var hasSlot = Reconnect.Enabled && Reconnect.HasPending(identityKey, DateTimeOffset.UtcNow);
             var mayWatch = _reconnectConfig.EnableSpectator;
 
             if (!hasSlot && !mayWatch)
             {
+                return null;
+            }
+
+            // 房主的模组支持"会议中进入"时放行: 续局/入座推迟到散会(见 Game.MeetingJoin.cs)。
+            if (HostSupportsMeetingJoin)
+            {
+                _logger.LogInformation(
+                    "{0} - MeetingGate: 会议进行中, 放行 {1}(保槽={2}), 散会后再续局。",
+                    Code,
+                    client.Name,
+                    hasSlot);
                 return null;
             }
 

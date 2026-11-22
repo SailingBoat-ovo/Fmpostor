@@ -24,6 +24,8 @@ public class GameEventHandler : IEventListener
     private readonly PlayerIdentityService _identityService;
     private readonly BadWordFilterService _filter;
     private readonly WelcomeService _welcome;
+    private readonly HitokotoService _hitokoto;
+    private readonly RoomInfoCommandService _roomInfo;
     private readonly ReportService _reportService;
     private readonly PlayerLogService _playerLogs;
     private readonly ReconnectLogService _reconnectLogs;
@@ -52,6 +54,8 @@ public class GameEventHandler : IEventListener
         "/nexthost - 房主转让房主给指定玩家\n" +
         "/title help - 称号系统（显示/设置称号）\n" +
         "/auto help - 满人自动开局（房主）\n" +
+        "/players - 查看本房间玩家列表（好友代码、延迟）\n" +
+        "/maxplayers <人数> - 房主在大厅修改最大人数（5~127）\n" +
         "/m on|off - 房主开关QQ群房间广播\n" +
         "/m - 房主推送房间报告到全部启用的QQ群\n" +
         "/m <内容> - 推送房间报告并在本房间下附一次性备注（下次发送不保留）\n" +
@@ -98,8 +102,12 @@ public class GameEventHandler : IEventListener
         RoomMonitorService roomMonitorService,
         RoomTransferService roomTransferService,
         BroadcastService broadcastService,
-        AdminStatsService adminStats)
+        AdminStatsService adminStats,
+        HitokotoService hitokoto,
+        RoomInfoCommandService roomInfo)
     {
+        _hitokoto = hitokoto;
+        _roomInfo = roomInfo;
         _logger = logger;
         _banService = banService;
         _chatService = chatService;
@@ -309,6 +317,9 @@ public class GameEventHandler : IEventListener
                     await Task.Delay(TimeSpan.FromSeconds(delay));
                 }
 
+                // 一言: 全服共用的当前一句(定时刷新), 按概率换成自定义一言。不在这里联网。
+                var quote = _hitokoto.Pick();
+
                 // 等待期间玩家可能已经离开, 或者身体已经换了 —— 那就不发。
                 if (clientPlayer.Character != control || clientPlayer.Game != game)
                 {
@@ -323,14 +334,14 @@ public class GameEventHandler : IEventListener
                     playerName = gameName;
                 }
 
-                var welcome = _welcome.Pick(playerName, game.Code.Code, firstVisit ? null : playerData, firstVisit);
+                var welcome = _welcome.Pick(playerName, game.Code.Code, firstVisit ? null : playerData, firstVisit, quote, _hitokoto.AppendToWelcome);
                 if (welcome == null)
                 {
                     return;
                 }
 
                 await control.SendChatToPlayerAsync(welcome, control);
-                _logger.LogInformation("[Welcome] Sent welcome to {Name} in {Code} after {Delay}s: {Msg}", playerName, game.Code.Code, delay, welcome);
+                _logger.LogInformation("[Welcome] 已向 {Name} 发送欢迎消息 (房间 {Code}, 延迟 {Delay}s)。", playerName, game.Code.Code, delay);
             }
             catch (Exception ex)
             {
@@ -552,6 +563,12 @@ public class GameEventHandler : IEventListener
             return;
         }
 
+        // /players, /maxplayers (以及 # 前缀的写法): 房间信息命令。
+        if (await _roomInfo.TryHandleAsync(e, trimmed))
+        {
+            return;
+        }
+
         // /m on|off: handled by RoomMonitorService itself (QQ broadcast toggle).
 
         // /help: list all available commands.
@@ -619,7 +636,7 @@ public class GameEventHandler : IEventListener
 
                     if (character != null)
                     {
-                        var text = ok ? reply : (error ?? "AI 暂时无法回复，请稍后再试。");
+                        var text = ok && !string.IsNullOrEmpty(reply) ? reply : (error ?? "AI 暂时无法回复，请稍后再试。");
                         await character.SendChatToPlayerAsync(text, character);
                     }
                 }
@@ -844,6 +861,86 @@ public class GameEventHandler : IEventListener
         _logger.LogInformation("[Report] Submitted by {Name} against {Target}({Fc}) in {Code}.",
             playerName, selName, selFc, e.Game.Code);
         await SendAsync("✅ 举报成功！管理员会在管理面板看到你的举报，感谢反馈。");
+    }
+
+    // ========== 游戏自带举报菜单（聊天框旁的按钮） ==========
+    //
+    // 与 /report 写进同一个举报列表, 面板里一起处理。为防刷:
+    //   · 同一举报者对同一个人 60 秒内只记一次;
+    //   · 同一举报者 1 分钟内最多 5 次。
+    // 超出时回给游戏"举报太频繁", 不入库。
+    private static readonly FixedWindowRateLimiter _buttonReportLimiter = new(5, TimeSpan.FromMinutes(1));
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _recentButtonReports = new();
+
+    private static string ReasonText(ReportReasons reason) => reason switch
+    {
+        ReportReasons.InappropriateName => "名字不当",
+        ReportReasons.InappropriateChat => "聊天内容不当",
+        ReportReasons.CheatingHacking => "作弊/外挂",
+        ReportReasons.HarassmentMisconduct => "骚扰/不当行为",
+        _ => "其他(" + (int)reason + ")",
+    };
+
+    [EventListener]
+    public async ValueTask OnPlayerReportButton(IGamePlayerReportEvent e)
+    {
+        if (e.Reported == null || e.Outcome != ReportOutcome.Reported)
+        {
+            return;
+        }
+
+        var reporter = e.Reporter;
+        var reporterName = ReportPlayerName(reporter);
+        var reporterKey = !string.IsNullOrEmpty(reporter.Client.Puid) ? reporter.Client.Puid : "client:" + reporter.Client.Id;
+        var pairKey = reporterKey + "->" + e.ReportedClientId + "@" + e.Game.Code.Code;
+
+        var now = DateTime.UtcNow;
+        foreach (var kv in _recentButtonReports)
+        {
+            if (now - kv.Value > TimeSpan.FromMinutes(5))
+            {
+                _recentButtonReports.TryRemove(kv.Key, out _);
+            }
+        }
+
+        if ((_recentButtonReports.TryGetValue(pairKey, out var last) && now - last < TimeSpan.FromSeconds(60))
+            || !_buttonReportLimiter.Allow("report-button:" + reporterKey))
+        {
+            e.Outcome = ReportOutcome.NotReportedRateLimit;
+            return;
+        }
+
+        _recentButtonReports[pairKey] = now;
+
+        var target = e.Reported;
+        var targetName = ReportPlayerName(target);
+        var targetFc = target.Client?.FriendCode ?? "";
+        var description = "[游戏内举报按钮] " + ReasonText(e.Reason);
+
+        try
+        {
+            await _reportService.AddAsync(new ReportEntry
+            {
+                ReporterName = reporterName,
+                ReporterFriendCode = reporter.Client.FriendCode ?? "",
+                ReporterPuid = reporter.Client.Puid ?? "",
+                ReporterIp = reporter.Client.Connection?.EndPoint?.Address?.ToString() ?? "",
+                GameCode = e.Game.Code.Code,
+                Description = description,
+                ReportedPlayerName = targetName,
+                ReportedPlayerFriendCode = targetFc,
+                ReportedPlayerPuid = target.Client?.Puid ?? "",
+            });
+
+            _playerLogs.Add("report", reporterName, reporter.Client.FriendCode ?? "", reporter.Client.Puid ?? "", e.Game.Code.Code, "举报 " + targetName + "(" + targetFc + "): " + description);
+            _logger.LogInformation("[Report] Report button: {Name} reported {Target}({Fc}) in {Code} for {Reason}.",
+                reporterName, targetName, targetFc, e.Game.Code, e.Reason);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Report] Failed to store a report-button report.");
+            e.Outcome = ReportOutcome.NotReportedUnknown;
+        }
     }
 
     private void CleanupReportSessions(string gameCode)

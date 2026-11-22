@@ -16,7 +16,7 @@
     '累计在线': '累計在線', '最近上线': '最近上線', '会话数': '會話數', '常用 IP': '常用 IP',
     '房间码': '房間碼', '违禁词': '違禁詞', '触发次数': '觸發次數', '任务类型': '任務類型',
     '模型名称': '模型名稱', '格式': '格式', '接口地址（Base URL）': '介面位址（Base URL）',
-    '服务器名称': '伺服器名稱', 'OneBot 地址': 'OneBot 位址', 'Token（可选）': 'Token（可選）',
+    '服务器名称': '伺服器名稱', 'AstrBot 地址': 'AstrBot 位址', 'AstrBot API Key': 'AstrBot API Key', '推送会话（一行一个 UMO；/m 房间报告、定时公告发到这些会话）': '推送會話（一行一個 UMO；/m 房間報告、定時公告發到這些會話）', '桥接口令（填到 AstrBot 插件配置里）': '橋接口令（填到 AstrBot 外掛設定裡）', '发送测试消息': '傳送測試訊息', '复制': '複製', '重新生成': '重新產生',
     '起始端口': '起始連接埠', '结束端口': '結束連接埠', '间隔（分钟）': '間隔（分鐘）',
     '禁言时长（分钟）': '禁言時長（分鐘）', '空房保留（分钟）': '空房保留（分鐘）', '保留复盘数': '保留複盤數',
     '启用称号': '啟用稱號', '称号带 []': '稱號帶 []', '默认位置': '預設位置', '名字前': '名字前', '名字后': '名字後',
@@ -162,8 +162,8 @@
     '🌐 多端口分配（Delta 端口池）': '🌐 多連接埠分配（Delta 連接埠池）',
     '开启后，每位玩家在获取 token 时会被分配一个专属 UDP 端口，解决 CDN/同一出口 IP 下多名玩家身份混淆问题。首次开启请先设置端口范围，保存后立即生效，已在线玩家不受影响。': '開啟後，每位玩家在取得 token 時會被分配一個專屬 UDP 連接埠，解決 CDN/同一出口 IP 下多名玩家身份混淆問題。首次開啟請先設定連接埠範圍，儲存後立即生效，已在線玩家不受影響。',
     '🧩 存储类功能开关': '🧩 儲存類功能開關', '空房自动清理': '空房自動清理',
-    '📡 QQ 群房间广播（OneBot）': '📡 QQ 群房間廣播（OneBot）',
-    '连接 NapCat/OneBot v11 的 HTTP + WebSocket 端点。启用后在允许的 QQ 群发送': '連線 NapCat/OneBot v11 的 HTTP + WebSocket 端點。啟用後在允許的 QQ 群傳送',
+    '📡 QQ 群房间广播（AstrBot）': '📡 QQ 群房間廣播（AstrBot）',
+    
     '可查看服务器房间列表；房主可用': '可查看伺服器房間清單；房主可用',
     '控制广播。保存后自动重连。': '控制廣播。儲存後自動重連。',
     '允许的 QQ 群号（逗号分隔）': '允許的 QQ 群號（逗號分隔）', '帆船 AmongUs 服务器': '帆船 AmongUs 伺服器',
@@ -175,7 +175,7 @@
     '👥 QQ群': '👥 QQ群',
     // —— 页面标题 ——
     '帆船控制台 · Among Us 服务器管理': '帆船控制台 · Among Us 伺服器管理',
-    '连接到你的帆船服务器 · Turbo-640': '連線到你的帆船伺服器 · Turbo-650',
+    '连接到你的帆船服务器 · Max-800': '連線到你的帆船伺服器 · Max-800',
     // —— AI 聊天记录统计 ——
     '本页 ': '本頁 ', '🖥 面板 ': '🖥 面板 ', '🎮 游戏内 ': '🎮 遊戲內 ', '🤖 Agent ': '🤖 Agent ',
     '⏰ 定时任务 ': '⏰ 定時任務 ', '今日 ': '今日 ', '问:': '問:', '答:': '答:',
@@ -215,7 +215,7 @@
     '累计在线': 'Total Online', '最近上线': 'Last Online', '会话数': 'Sessions', '常用 IP': 'Common IPs',
     '房间码': 'Room Code', '违禁词': 'Banned Word', '触发次数': 'Trigger Count', '任务类型': 'Task Type',
     '模型名称': 'Model Name', '格式': 'Format', '接口地址（Base URL）': 'Base URL',
-    '服务器名称': 'Server Name', 'OneBot 地址': 'OneBot Address', 'Token（可选）': 'Token (optional)',
+    '服务器名称': 'Server Name', 'AstrBot 地址': 'AstrBot Address', 'AstrBot API Key': 'AstrBot API Key', '推送会话（一行一个 UMO；/m 房间报告、定时公告发到这些会话）': 'Target sessions (one UMO per line; /m reports and scheduled announcements go here)', '桥接口令（填到 AstrBot 插件配置里）': 'Bridge token (enter it in the AstrBot plugin config)', '发送测试消息': 'Send test message', '复制': 'Copy', '重新生成': 'Regenerate',
     '起始端口': 'Start Port', '结束端口': 'End Port', '间隔（分钟）': 'Interval (min)',
     '禁言时长（分钟）': 'Mute Duration (min)', '空房保留（分钟）': 'Room TTL (min)', '保留复盘数': 'Replays Kept',
     '启用称号': 'Enable Titles', '称号带 []': 'Brackets []', '默认位置': 'Default Position', '名字前': 'Before Name', '名字后': 'After Name',
@@ -361,8 +361,8 @@
     '🌐 多端口分配（Delta 端口池）': '🌐 Multi-Port Assignment (Delta Port Pool)',
     '开启后，每位玩家在获取 token 时会被分配一个专属 UDP 端口，解决 CDN/同一出口 IP 下多名玩家身份混淆问题。首次开启请先设置端口范围，保存后立即生效，已在线玩家不受影响。': 'When enabled, each player gets a dedicated UDP port when obtaining a token, solving identity confusion behind CDN/shared egress IPs. Set the port range before enabling; takes effect immediately after saving; players already online are unaffected.',
     '🧩 存储类功能开关': '🧩 Storage Feature Toggles', '空房自动清理': 'Auto-Clean Empty Rooms',
-    '📡 QQ 群房间广播（OneBot）': '📡 QQ Group Room Broadcast (OneBot)',
-    '连接 NapCat/OneBot v11 的 HTTP + WebSocket 端点。启用后在允许的 QQ 群发送': 'Connects to NapCat/OneBot v11 HTTP + WebSocket endpoints. When enabled, sending',
+    '📡 QQ 群房间广播（AstrBot）': '📡 QQ Group Room Broadcast (AstrBot)',
+    
     '可查看服务器房间列表；房主可用': 'in allowed QQ groups shows the room list; hosts can use',
     '控制广播。保存后自动重连。': 'to control broadcast. Auto-reconnects after saving.',
     '允许的 QQ 群号（逗号分隔）': 'Allowed QQ group IDs (comma-separated)', '帆船 AmongUs 服务器': 'FanChuan AmongUs Server',
@@ -374,7 +374,7 @@
     '👥 QQ群': '👥 QQ Group',
     // —— 页面标题 ——
     '帆船控制台 · Among Us 服务器管理': 'FanChuan Console · Among Us Server Management',
-    '连接到你的帆船服务器 · Turbo-640': 'Connect to your FanChuan server · Turbo-650',
+    '连接到你的帆船服务器 · Max-800': 'Connect to your FanChuan server · Max-800',
     // —— AI 聊天记录统计 ——
     '本页 ': 'This page ', '🖥 面板 ': '🖥 Panel ', '🎮 游戏内 ': '🎮 In-Game ', '🤖 Agent ': '🤖 Agent ',
     '⏰ 定时任务 ': '⏰ Scheduled ', '今日 ': 'Today ', '问:': 'Q:', '答:': 'A:',

@@ -1,6 +1,6 @@
 /* ============================================
    帆船 Impostor Server 管理面板 - App
-   Version: Turbo-700.0-20261024
+   Version: Max-800.0-20261122
    安全加固：esc() 属性安全化、Agent 操作确认与消毒、
    默认 HTTPS、密码强度、XSS 字段转义补全
    ============================================ */
@@ -38,6 +38,82 @@ function toast(msg, type) {
 
 function openModal(id) { $(id).classList.add('active'); }
 function closeModal(id) { $(id).classList.remove('active'); }
+
+// ── 自绘确认框 / 输入框 ──
+//   不用浏览器自带的 confirm()/prompt(): 在部分浏览器和内嵌页面里它们会被拦截或直接返回,
+//   出现"点取消也照样执行"(例如踢人)。这里返回 Promise:
+//     uiConfirm → true(确定) / false(取消、Esc、点遮罩)
+//     uiPrompt  → 输入的文字(可为空串) / null(取消) —— 调用方必须把 null 当作"不执行"。
+function uiDialog(opts) {
+  return new Promise(resolve => {
+    const o = Object.assign({ title: '请确认', message: '', input: false, placeholder: '', value: '', okText: '确定', cancelText: '取消', danger: false }, opts || {});
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay active ui-dialog-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal ui-dialog';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    const h = document.createElement('h2');
+    h.textContent = o.title;
+    const msg = document.createElement('div');
+    msg.className = 'ui-dialog-message';
+    msg.textContent = o.message;
+    box.appendChild(h);
+    box.appendChild(msg);
+    let input = null;
+    if (o.input) {
+      const g = document.createElement('div');
+      g.className = 'form-group';
+      input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = o.placeholder;
+      input.value = o.value;
+      input.maxLength = 200;
+      g.appendChild(input);
+      box.appendChild(g);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancel = document.createElement('button');
+    cancel.className = 'btn btn-ghost';
+    cancel.textContent = o.cancelText;
+    const ok = document.createElement('button');
+    ok.className = 'btn ' + (o.danger ? 'btn-danger' : 'btn-primary');
+    ok.textContent = o.okText;
+    actions.appendChild(cancel);
+    actions.appendChild(ok);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    let done = false;
+    const finish = (confirmed) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      if (o.input) resolve(confirmed ? (input.value || '') : null);
+      else resolve(!!confirmed);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+      else if (e.key === 'Enter' && (!input || document.activeElement === input || document.activeElement === ok)) { e.preventDefault(); e.stopPropagation(); finish(true); }
+    };
+    cancel.addEventListener('click', () => finish(false));
+    ok.addEventListener('click', () => finish(true));
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) finish(false); });
+    document.addEventListener('keydown', onKey, true);
+    setTimeout(() => (input || ok).focus(), 0);
+  });
+}
+
+const DANGER_WORDS = /删除|清空|封禁|踢出|失效|不可恢复|执行操作/;
+function uiConfirm(message, opts) {
+  return uiDialog(Object.assign({ title: '请确认', message: String(message), danger: DANGER_WORDS.test(String(message)) }, opts || {}));
+}
+function uiPrompt(message, opts) {
+  return uiDialog(Object.assign({ title: '请输入', message: String(message), input: true }, opts || {}));
+}
 
 async function api(method, path, body) {
   const opts = { method };
@@ -159,8 +235,8 @@ function connectServer(index) {
   $('password').focus();
 }
 
-function deleteServer(index) {
-  if (!confirm('删除该服务器记录？')) return;
+async function deleteServer(index) {
+  if (!(await uiConfirm('删除该服务器记录？'))) return;
   state.servers.splice(index, 1);
   saveServers();
 }
@@ -250,7 +326,7 @@ async function loadFilterStats() {
 }
 
 async function clearFilterStats(id) {
-  if (id === undefined && !confirm(t('确定清空全部违禁词统计？'))) return;
+  if (id === undefined && !(await uiConfirm(t('确定清空全部违禁词统计？')))) return;
   const body = id === undefined ? { all: true } : { id };
   const d = await api('POST', '/api/filter/stats/clear', body);
   if (d) toast(d.success ? ('已删除 ' + (d.removed || 0) + ' 条') : d.message, d.success ? 'success' : 'error');
@@ -274,7 +350,7 @@ async function loadBStats() {
 }
 
 async function clearBStats(id) {
-  if (id === undefined && !confirm(t('确定清空全部QQ群广播统计？'))) return;
+  if (id === undefined && !(await uiConfirm(t('确定清空全部QQ群广播统计？')))) return;
   const body = id === undefined ? { all: true } : { id };
   const d = await api('POST', '/api/monitor/bstats/clear', body);
   if (d) toast(d.success ? ('已删除 ' + (d.removed || 0) + ' 条') : d.message, d.success ? 'success' : 'error');
@@ -386,7 +462,8 @@ function updateSelCount(kind) {
 async function batchKickPlayers() {
   const ids = Array.from(state.selectedPlayers);
   if (!ids.length) { toast('请先选择玩家', 'error'); return; }
-  const reason = prompt('踢出原因（可选）:');
+  const reason = await uiPrompt('踢出原因（可选，可留空）:', { title: '踢出玩家', okText: '踢出', danger: true, placeholder: '例如: 恶意刷屏' });
+  if (reason === null) return;
   const d = await api('POST', '/api/kick/batch', { clientIds: ids, reason: reason || null });
   if (d) { toast(d.success ? d.message : d.message, d.success ? 'success' : 'error'); if (d.success) { state.selectedPlayers.clear(); refreshAll(); } }
 }
@@ -394,7 +471,8 @@ async function batchKickPlayers() {
 async function batchKickGames() {
   const codes = Array.from(state.selectedGames);
   if (!codes.length) { toast('请先选择房间', 'error'); return; }
-  const reason = prompt('踢出原因（可选）:');
+  const reason = await uiPrompt('踢出原因（可选，可留空）:', { title: '踢出玩家', okText: '踢出', danger: true, placeholder: '例如: 恶意刷屏' });
+  if (reason === null) return;
   const d = await api('POST', '/api/kick/batch', { gameCodes: codes, reason: reason || null });
   if (d) { toast(d.success ? d.message : d.message, d.success ? 'success' : 'error'); if (d.success) { state.selectedGames.clear(); refreshAll(); } }
 }
@@ -475,9 +553,9 @@ async function loadConnLog(filter) {
 }
 
 // ============== ACTIONS ==============
-async function kickPlayer(id) { const r = prompt('踢出原因（可选）:'); const d = await api('POST', '/api/kick', { clientId: id, reason: r || null }); if (d) toast(d.success ? '已踢出' : d.message, d.success ? 'success' : 'error'); }
-async function banPlayer(id) { if (!confirm('确定封禁？')) return; const d = await api('POST', '/api/ban', { clientId: id }); if (d) toast(d.success ? '已封禁' : d.message, d.success ? 'success' : 'error'); }
-async function removeBan(id) { if (!confirm('删除该封禁？')) return; const d = await api('POST', '/api/ban/remove', { id }); if (d) toast(d.success ? '已删除' : d.message, d.success ? 'success' : 'error'); }
+async function kickPlayer(id) { const r = await uiPrompt('踢出原因（可选，可留空）:', { title: '踢出玩家', okText: '踢出', danger: true, placeholder: '例如: 恶意刷屏' }); if (r === null) return; const d = await api('POST', '/api/kick', { clientId: id, reason: r || null }); if (d) toast(d.success ? '已踢出' : d.message, d.success ? 'success' : 'error'); }
+async function banPlayer(id) { if (!(await uiConfirm('确定封禁？'))) return; const d = await api('POST', '/api/ban', { clientId: id }); if (d) toast(d.success ? '已封禁' : d.message, d.success ? 'success' : 'error'); }
+async function removeBan(id) { if (!(await uiConfirm('删除该封禁？'))) return; const d = await api('POST', '/api/ban/remove', { id }); if (d) toast(d.success ? '已删除' : d.message, d.success ? 'success' : 'error'); }
 function showAddBanModal() { $('banName').value = ''; $('banPuid').value = ''; $('banFriendCode').value = ''; $('banFid').value = ''; $('banIp').value = ''; $('banReason').value = ''; openModal('addBanModal'); }
 async function confirmAddBan() { const d = await api('POST', '/api/ban/add', { playerName: $('banName').value, puid: $('banPuid').value, friendCode: $('banFriendCode').value, fid: $('banFid').value, ipAddress: $('banIp').value, reason: $('banReason').value }); if (d) { toast(d.success ? '封禁已添加' : d.message, d.success ? 'success' : 'error'); if (d.success) closeModal('addBanModal'); } }
 
@@ -552,7 +630,7 @@ function renderUsers(users, currentUser) {
 }
 
 async function deleteUser(username) {
-  if (!confirm('确定要删除用户 ' + username + ' 吗？')) return;
+  if (!(await uiConfirm('确定要删除用户 ' + username + ' 吗？'))) return;
   const d = await api('DELETE', '/api/users', { username });
   if (d) { toast(d.success ? '用户已删除' : d.message, d.success ? 'success' : 'error'); if (d.success) loadSettings(); }
 }
@@ -693,7 +771,7 @@ function showReportDetail(id) {
 }
 
 async function removeReport(id) {
-  if (!confirm('删除该举报？')) return;
+  if (!(await uiConfirm('删除该举报？'))) return;
   const d = await api('POST', '/api/reports/remove', { id });
   if (d) { toast(d.success ? '已删除' : d.message, d.success ? 'success' : 'error'); if (d.success) loadReports(); }
 }
@@ -767,7 +845,7 @@ function renderStats() {
 }
 
 async function resetPlayerStats() {
-  if (!confirm('确定清空全部玩家战绩？此操作不可恢复！')) return;
+  if (!(await uiConfirm('确定清空全部玩家战绩？此操作不可恢复！'))) return;
   const d = await api('POST', '/api/player-stats/reset');
   if (d) { toast(d.success ? '已清空' : d.message, d.success ? 'success' : 'error'); if (d.success) loadStats(); }
 }
@@ -794,7 +872,7 @@ async function addGameCode() {
 }
 
 async function removeGameCode(code) {
-  if (!confirm('删除房间码 ' + code + '？')) return;
+  if (!(await uiConfirm('删除房间码 ' + code + '？'))) return;
   const d = await api('POST', '/api/codes/remove', { code });
   if (d) { toast(d.success ? '已删除' : d.message, d.success ? 'success' : 'error'); if (d.success) loadCodes(); }
 }
@@ -1009,7 +1087,7 @@ async function pollScheduleAi(id, n) {
 }
 
 async function deleteSchedule(id, name) {
-  if (!confirm('删除定时任务「' + name + '」？')) return;
+  if (!(await uiConfirm('删除定时任务「' + name + '」？'))) return;
   const d = await api('POST', '/api/schedule/delete', { id });
   if (d) { toast(d.success ? '已删除' : d.message, d.success ? 'success' : 'error'); if (d.success) loadSchedule(); }
 }
@@ -1047,6 +1125,49 @@ async function loadWelcomeSettings() {
   if ($('welcomeDelay')) $('welcomeDelay').value = (typeof d.delaySeconds === 'number') ? d.delaySeconds : 3;
   if ($('welcomeNewPlayerMsg')) $('welcomeNewPlayerMsg').value = d.newPlayerMessage || '';
   renderWelcomeMsgs(d.messages || []);
+  loadHitokoto();
+}
+
+// ============== 一言 ==============
+async function loadHitokoto() {
+  const d = await api('GET', '/api/hitokoto');
+  if (!d || !d.success) return;
+  if ($('hitokotoEnabled')) $('hitokotoEnabled').value = d.enabled ? 'true' : 'false';
+  if ($('hitokotoInterval')) $('hitokotoInterval').value = d.updateIntervalSeconds;
+  if ($('hitokotoChance')) $('hitokotoChance').value = d.customChance;
+  if ($('hitokotoAppend')) $('hitokotoAppend').value = d.appendToWelcome ? 'true' : 'false';
+  if ($('hitokotoUrl')) $('hitokotoUrl').value = (d.apiUrl && d.apiUrl !== d.defaultApiUrl) ? d.apiUrl : '';
+  if ($('hitokotoCustom')) $('hitokotoCustom').value = (d.customList || []).map(e => e.from ? (e.text + '|' + e.from) : e.text).join('\n');
+  const box = $('hitokotoCurrent');
+  if (box) {
+    box.textContent = d.current
+      ? ('当前一言：' + d.current.text + (d.current.from ? '\n—— ' + d.current.from : '') + '\n（取于 ' + new Date(d.current.fetchedAt).toLocaleString() + '）')
+      : (d.enabled ? '当前一言：还没取到（接口不通时欢迎语会改用自定义一言）' : '一言已关闭');
+  }
+}
+
+async function saveHitokoto() {
+  const customList = ($('hitokotoCustom').value || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const i = l.lastIndexOf('|');
+    return i > 0 ? { text: l.slice(0, i).trim(), from: l.slice(i + 1).trim() } : { text: l, from: '' };
+  });
+  const body = {
+    enabled: $('hitokotoEnabled').value === 'true',
+    appendToWelcome: $('hitokotoAppend').value === 'true',
+    apiUrl: $('hitokotoUrl').value.trim(),
+    customList,
+  };
+  const interval = parseInt($('hitokotoInterval').value, 10);
+  if (!isNaN(interval)) body.updateIntervalSeconds = Math.max(60, interval);
+  const chance = parseFloat($('hitokotoChance').value);
+  if (!isNaN(chance)) body.customChance = Math.max(0, Math.min(100, chance));
+  const d = await api('POST', '/api/hitokoto', body);
+  if (d) { toast(d.success ? '一言设置已保存' : d.message, d.success ? 'success' : 'error'); if (d.success) loadHitokoto(); }
+}
+
+async function refreshHitokoto() {
+  const d = await api('POST', '/api/hitokoto/refresh');
+  if (d) { toast(d.success ? ('已换一句：' + d.text) : d.message, d.success ? 'success' : 'error'); loadHitokoto(); }
 }
 
 function renderWelcomeMsgs(msgs) {
@@ -1097,7 +1218,7 @@ async function loadPlayerTimes() {
 }
 
 async function clearPlayerTimes() {
-  if (!confirm('确定清空全部玩家时长记录？此操作不可恢复！')) return;
+  if (!(await uiConfirm('确定清空全部玩家时长记录？此操作不可恢复！'))) return;
   const d = await api('POST', '/api/player-times/clear');
   if (d) { toast(d.success ? '已清空' : d.message, d.success ? 'success' : 'error'); if (d.success) loadPlayerTimes(); }
 }
@@ -1147,7 +1268,7 @@ async function addTitle() {
 }
 
 async function removeTitle(name) {
-  if (!confirm('删除称号 ' + name + '？（已分配的玩家称号将被清除）')) return;
+  if (!(await uiConfirm('删除称号 ' + name + '？（已分配的玩家称号将被清除）'))) return;
   const d = await api('POST', '/api/titles', { action: 'removeTitle', name });
   if (d) { toast(d.success ? '已删除' : d.message, d.success ? 'success' : 'error'); if (d.success) loadTitles(); }
 }
@@ -1176,14 +1297,15 @@ async function removePlayerTitle(fc) {
   if (d) { toast(d.success ? '已清除' : d.message, d.success ? 'success' : 'error'); if (d.success) loadTitles(); }
 }
 
-// ============== QQ ROOM MONITOR（OneBot） ==============
+// ============== QQ ROOM MONITOR（AstrBot） ==============
 async function loadMonitorSettings() {
   const d = await api('GET', '/api/monitor');
   if (!d || !d.success) return;
   $('monitorEnabled').value = d.enabled ? 'true' : 'false';
-  $('monitorUrl').value = d.oneBotUrl || '';
-  $('monitorToken').value = d.oneBotToken || '';
-  $('monitorGroups').value = (d.allowedGroups || []).join(',');
+  $('monitorAstrUrl').value = d.astrBotUrl || '';
+  $('monitorAstrKey').value = d.astrBotApiKey || '';
+  $('monitorSessions').value = (d.targetSessions || []).join('\n');
+  $('monitorBridgeToken').value = d.bridgeToken || '';
   $('monitorServerName').value = d.serverName || '';
   // 未自定义模板时，编辑框里直接显示内置默认格式（保存原样即等于默认）
   window._monitorDefaults = {
@@ -1208,19 +1330,39 @@ function resetMonitorTemplate(textareaId, defaultKey) {
 }
 
 async function saveMonitorSettings() {
-  const groups = $('monitorGroups').value.split(',').map(s => s.trim()).filter(s => /^\d+$/.test(s)).map(Number);
+  const sessions = $('monitorSessions').value.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
   const triggers = $('monitorStatusTriggers').value.split(/[,，、;；]+/).map(s => s.trim()).filter(Boolean);
   const d = await api('POST', '/api/monitor', {
     enabled: $('monitorEnabled').value === 'true',
-    oneBotUrl: $('monitorUrl').value.trim(),
-    oneBotToken: $('monitorToken').value.trim(),
-    allowedGroups: groups,
+    astrBotUrl: $('monitorAstrUrl').value.trim(),
+    astrBotApiKey: $('monitorAstrKey').value.trim(),
+    targetSessions: sessions,
     serverName: $('monitorServerName').value.trim(),
     statusTriggers: triggers,
     roomReportTemplate: $('monitorRoomReportTemplate').value,
     statusReplyTemplate: $('monitorStatusReplyTemplate').value,
   });
   if (d) toast(d.success ? '广播设置已保存并生效' : d.message, d.success ? 'success' : 'error');
+}
+
+async function testMonitorSend() {
+  const first = $('monitorSessions').value.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean)[0] || '';
+  const d = await api('POST', '/api/monitor/test', { session: first });
+  if (d) toast(d.message || (d.success ? '已发送' : '发送失败'), d.success ? 'success' : 'error');
+}
+
+async function regenBridgeToken() {
+  if (!(await uiConfirm('重新生成后，AstrBot 插件里的旧口令立即失效，需要改成新口令。继续？'))) return;
+  const d = await api('POST', '/api/monitor/bridge-token', {});
+  if (d && d.success) { $('monitorBridgeToken').value = d.bridgeToken; toast('已生成新的桥接口令', 'success'); }
+}
+
+function copyBridgeToken() {
+  const v = $('monitorBridgeToken').value;
+  if (!v) return;
+  (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(
+    () => toast('已复制', 'success'),
+    () => { $('monitorBridgeToken').select(); document.execCommand('copy'); toast('已复制', 'success'); });
 }
 
 // ============== FILTER AUTO-MUTE ==============
@@ -1374,7 +1516,7 @@ async function viewReplay(file) {
 }
 
 async function deleteAllReplays() {
-  if (!confirm('确定清空全部复盘记录？此操作不可恢复！')) return;
+  if (!(await uiConfirm('确定清空全部复盘记录？此操作不可恢复！'))) return;
   const d = await api('POST', '/api/replays/delete-all');
   if (d) { toast(d.success ? d.message : d.message, d.success ? 'success' : 'error'); if (d.success) loadReplays(); }
 }
@@ -1425,7 +1567,7 @@ async function viewFootprint(key) {
 }
 
 async function clearFootprints() {
-  if (!confirm('确定清空全部玩家足迹？此操作不可恢复！')) return;
+  if (!(await uiConfirm('确定清空全部玩家足迹？此操作不可恢复！'))) return;
   const d = await api('POST', '/api/footprints/clear');
   if (d) { toast(d.success ? '已清空' : d.message, d.success ? 'success' : 'error'); if (d.success) loadFootprints(); }
 }
@@ -1622,7 +1764,7 @@ async function sendAiChat() {
 }
 
 async function clearAiContext() {
-  if (!confirm('清空 AI 面板对话上下文？（仅影响后续对话记忆，不影响聊天记录）')) return;
+  if (!(await uiConfirm('清空 AI 面板对话上下文？（仅影响后续对话记忆，不影响聊天记录）'))) return;
   const d = await api('POST', '/api/ai/context-clear');
   if (d) toast(d.success ? d.message : d.message, d.success ? 'success' : 'error');
 }
@@ -2156,11 +2298,11 @@ const AGENT_TOOLS = {
   },
   get_monitor_settings: {
     cat: 'query',
-    desc: '获取 QQ 群房间广播（OneBot）设置',
+    desc: '获取 QQ 群房间广播（AstrBot）设置',
     run: async () => {
       const d = await api('GET', '/api/monitor');
       if (!d || !d.success) return { ok: false, summary: '无法获取广播设置' };
-      return { ok: true, summary: '启用=' + (d.enabled ? '是' : '否') + ' 地址=' + (d.oneBotUrl || '未设置') + ' 群=' + ((d.allowedGroups || []).join(',') || '无') + ' 状态命令=' + ((d.statusTriggers || []).join('/') || '默认') + ' 模板=' + (d.roomReportTemplate || '默认') };
+      return { ok: true, summary: '启用=' + (d.enabled ? '是' : '否') + ' AstrBot=' + (d.astrBotUrl || '未设置') + ' 推送会话=' + ((d.targetSessions || []).join(',') || '无') + ' 状态命令=' + ((d.statusTriggers || []).join('/') || '默认') + ' 模板=' + (d.roomReportTemplate || '默认') };
     },
   },
   get_player_times: {
@@ -2309,12 +2451,11 @@ const AGENT_TOOLS = {
     },
   },
   update_monitor_settings: {
-    desc: '更新 QQ 群房间广播设置 params:{enabled?, oneBotUrl?, oneBotToken?, allowedGroups?:[], serverName?, statusTriggers?:[] (状态命令,默认["#在线状态"]), roomReportTemplate?, statusReplyTemplate?}（模板占位符 {server}/{count}/{rooms}/{time}）',
+    desc: '更新 QQ 群房间广播（AstrBot）设置 params:{enabled?, astrBotUrl?, astrBotApiKey?, targetSessions?:[] (AstrBot 会话 UMO), serverName?, statusTriggers?:[] (状态命令,默认["#在线状态"]), roomReportTemplate?, statusReplyTemplate?}（模板占位符 {server}/{count}/{rooms}/{time}）',
     run: async (p) => {
-      const body = pick(p, ['enabled', 'oneBotUrl', 'oneBotToken', 'allowedGroups', 'serverName']);
-      // Groups must be numeric for List<long> binding.
-      if (Array.isArray(body.allowedGroups)) {
-        body.allowedGroups = body.allowedGroups.map(g => parseInt(g)).filter(n => !Number.isNaN(n));
+      const body = pick(p, ['enabled', 'astrBotUrl', 'astrBotApiKey', 'targetSessions', 'serverName', 'statusTriggers', 'roomReportTemplate', 'statusReplyTemplate']);
+      if (Array.isArray(body.targetSessions)) {
+        body.targetSessions = body.targetSessions.map(s => String(s).trim()).filter(Boolean);
       }
       const d = await api('POST', '/api/monitor', body);
       return { ok: !!(d && d.success), summary: (d && (d.message || (d.success ? '已保存' : ''))) || '请求失败' };
@@ -2598,7 +2739,7 @@ async function runAgentChat(userMsg) {
         // Action-class tools change server state: require explicit human
         // confirmation for every call, with secrets redacted in the prompt.
         if (!isQuery) {
-          const okRun = confirm('🤖 AI 请求执行操作，请确认：\n\n工具: ' + a.tool + '\n参数: ' + JSON.stringify(safeParams) + '\n\n确认执行？');
+          const okRun = await uiConfirm('🤖 AI 请求执行操作，请确认：\n\n工具: ' + a.tool + '\n参数: ' + JSON.stringify(safeParams) + '\n\n确认执行？');
           if (!okRun) {
             renderAgentAction(a.tool, safeParams, 'fail', '已手动取消该操作');
             results.push({ tool: a.tool, ok: false, summary: '管理员取消了该操作。停止执行并直接向管理员确认下一步，不要再输出 ACTION。' });

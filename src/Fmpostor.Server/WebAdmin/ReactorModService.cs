@@ -88,7 +88,8 @@ public sealed class ReactorModService
             return;
         }
 
-        if (_pending.TryRemove(client.Connection, out var entry))
+        // 连接在注册前已断开时 Connection 可能为 null; ConcurrentDictionary 遇 null 键会抛异常。
+        if (client.Connection != null && _pending.TryRemove(client.Connection, out var entry))
         {
             client.Items["ReactorMods"] = entry.Info;
             return;

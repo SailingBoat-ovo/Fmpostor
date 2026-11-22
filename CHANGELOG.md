@@ -6,6 +6,69 @@
 
 ## 中文
 
+### Max-800.0-20261122
+
+上一版本：Turbo-700.0-20261024。700 服务器可在面板「自动更新」一键升级。版本号从 Turbo 系列进入 **Max** 系列。
+
+#### 🔌 断线重连完整版（配合 NebulaResume v2.0）
+
+- **会议中重连**：会议进行中也能进房。重连者以原身份继续投票，会议（含放逐动画）结束后自动续局；原身份若在这场会议里被投出，回来就是灵魂。需要房主装有 NebulaResume v2.0，旧版插件维持“会议中不放行、会后开放”。
+- **观战者中途加入**：允许观战时，新玩家可在对局中途以中立观战者身份进入，不参与胜负。
+- **重连后正常结算**：满足胜利条件时，没有回来的旧身份和已被新身份接替的旧身份都会被清理，不再出现“满足条件却不结算”。
+- **结算总结**：同一个人重连多次只显示一行，不再出现占位用的船员职业；重连过的玩家标注「重连玩家」。
+- 修复重连后附加的「紧急会议」技能重复出现。
+- 修复中途生成的身体在每帧更新里反复触发空引用（造成卡顿）。
+
+#### 🖥️ 启动界面
+
+- 控制台启动界面改为与「帆船AmongUs服务器工具箱」同一风格：彩色 FANCHUAN 大字、标题、版本号、监听端口 / 公网地址 / HTTP 服务 / 配置文件状态；窗口标题显示版本。
+
+#### 🧾 面板对话框
+
+- 面板里所有确认（删除、封禁、清空等）和踢人原因输入都改为面板自绘的对话框，不再使用浏览器自带弹窗。
+- 修复：踢人时点「取消」仍然会踢出。现在取消、按 Esc、点空白处都不会执行。
+- 危险操作的确认按钮显示为红色；支持回车确认。
+
+#### ⚡ 性能与稳定性（不影响功能）
+
+- 改用工作站 GC（后台回收），常驻内存与线程数明显降低；启用 TieredPGO。
+- 空引用防护：连接在注册前断开、AI 返回空回复、手改 JSON 把列表写成 null、增量端口在主端口就绪前启动等情况不再抛异常。
+
+#### 🍾 一言（每小时的漂流瓶）回归
+
+- 全服共用一句「当前一言」，按间隔自动刷新（默认每小时，可改）；每次发欢迎语时按概率（默认 5%）改用一条自定义一言，内置的「帆船」那条始终在自定义池里。
+- 欢迎语里写 `{HITOKOTO}` / `{HITOKOTO_FROM}`，旧写法 `<YY>` / `<ZZ>` 同样有效；没写的话可以自动加在欢迎语末尾。
+- 接口不通时用自定义一言兜底，不会出现空行。
+- 面板「欢迎语」页新增一言卡片：开关、刷新间隔、自定义概率、接口地址、自定义一言（`句子|出处`，一行一条）、「立即换一句」。
+- 首次启动自动导入旧的 `Fanchuan.Hitokoto.Config.json`。
+
+#### 👥 新命令：`/players`、`/maxplayers`
+
+- `/players`（也可用 `/list`、`#players`）：任何人可用，私聊返回本房间玩家列表：房间码、房主、人数/上限，每人的编号、名字、好友代码、延迟。人多时自动分段发送。
+- `/maxplayers <人数>`（也可用 `/maxplayer`、`/max`、`#maxplayers`）：房主在大厅修改最大人数（5~127，不能少于当前人数），改完同步给全房间。
+- 两条命令已加入 `/help`。
+
+#### 📢 接入游戏自带的举报按钮
+
+- 原版和模组玩家点聊天框旁边的举报按钮，举报都会进入面板「举报处理」，与 `/report` 在同一个列表（内容标注「游戏内举报按钮」和原因）。
+- 游戏里会正常提示「已举报」；同一人 60 秒内重复举报同一个人、或 1 分钟内超过 5 次，提示「举报太频繁」。
+- `/report` 交互式举报保留不变。
+
+#### 🤖 QQ 机器人改用 AstrBot（替换 OneBot）
+
+- 删除 OneBot/NapCat 连接，改为通过 **AstrBot** 收发 QQ 消息。AstrBot 可以直接接入 **QQ 官方机器人**。
+- 发送：`/m` 房间报告、定时公告、订阅提醒通过 AstrBot 的 OpenAPI（`POST /api/v1/im/messages`，兼容旧版 `/im/message`）发到面板里填的会话（UMO）。
+- 接收群命令：新增配套 AstrBot 插件 [`astrbot_plugin_fmpostor`](https://github.com/SailingBoat-ovo/astrbot_plugin_fmpostor)（发布包里也附带），把 `#在线状态` / `#订阅` / `#退订` / `#帮助` 转发给服务端，用桥接口令校验。
+- `#订阅` 的提醒改为发回订阅时所在的群（QQ 官方机器人不能私聊只在群里出现过的成员）。
+- QQ 官方机器人在群里主动发言需要群主在群设置里打开「机器人主动在群聊内发言」；群命令的回复不受影响。
+- ⚠️ 升级后需要在面板重新填写 QQ 设置（AstrBot 地址、API Key、推送会话），旧的 OneBot 地址与群号不再使用；旧的订阅记录不会迁移。
+
+#### 📱 面板手机竖屏界面
+
+- 宽度 ≤ 760px 时自动切换：☰ 抽屉式菜单、底部导航（房间 / 玩家 / 聊天 / 举报 / 更多）、精简顶栏。
+- 表格自动变成卡片（每行一张卡，带列名），表单单列排布，按钮和输入框加大，输入框不再触发 iOS 自动放大，弹窗全屏。
+- 桌面端不受影响。
+
 ### Turbo-700.0-20261024
 
 上一版本：Turbo-650.0-20260905。650 服务器可在面板「自动更新」一键升级。
@@ -117,6 +180,69 @@
 ---
 
 ## English
+
+### Max-800.0-20261122
+
+Previous version: Turbo-700.0-20261024. A 700 server can upgrade in one click from the panel's **Auto Update** page. Version numbers move from the Turbo series to the **Max** series.
+
+#### 🔌 Reconnect, complete (with NebulaResume v2.0)
+
+- **Rejoin during meetings**: players can now enter while a meeting is running. They vote under their original identity, and the round resumes once the meeting (including the ejection) ends; if that identity was voted out, they come back as a ghost. Needs the host to run NebulaResume v2.0; with older add-ons, joins stay closed during meetings and reopen afterwards.
+- **Spectators mid-round**: when spectating is allowed, new players can join a running round as neutral spectators who cannot win or lose.
+- **Games end normally after reconnects**: once a win condition is met, old identities that never came back, and old identities already replaced by a new one, are cleaned up, so the game no longer hangs without ending.
+- **End-of-game summary**: a player who reconnected several times is listed once, without the placeholder crewmate role, and tagged "reconnected".
+- Fixed the extra "Emergency meeting" modifier after reconnecting.
+- Fixed bodies spawned mid-round throwing a null reference on every physics frame (stutter).
+
+#### 🖥️ Startup screen
+
+- The console startup screen now matches the "帆船AmongUs服务器" toolbox style: coloured FANCHUAN banner, title, version, listen port / public address / HTTP / config status, and the version in the window title.
+
+#### 🧾 Panel dialogs
+
+- Every panel confirmation (delete, ban, clear…) and the kick-reason input now use an in-page dialog instead of the browser's own popups.
+- Fixed: pressing Cancel on a kick still kicked the player. Cancel, Esc or clicking outside the dialog now does nothing.
+- Dangerous confirmations use a red button; Enter confirms.
+
+#### ⚡ Performance and stability (no functional changes)
+
+- Switched to workstation (background) GC: noticeably lower resident memory and fewer threads. TieredPGO enabled.
+- Null-reference guards for a connection that drops before it is registered, an empty AI reply, JSON files edited to contain null lists, and a delta port starting before the main port is ready.
+
+#### 🍾 Hitokoto ("the hourly drift bottle") is back
+
+- One shared quote for the whole server, refreshed on an interval (hourly by default, configurable). Each welcome message has a chance (5% by default) to use a custom quote instead; the built-in "帆船" line is always in the custom pool.
+- Use `{HITOKOTO}` / `{HITOKOTO_FROM}` in welcome texts; the old `<YY>` / `<ZZ>` placeholders still work. Without a placeholder, the quote can be appended automatically.
+- When the quote API is unreachable a custom quote is used, so the line is never empty.
+- New Hitokoto card on the panel's Welcome page: on/off, refresh interval, custom chance, API URL, custom quotes (`text|source`, one per line), "new quote now".
+- The old `Fanchuan.Hitokoto.Config.json` is imported automatically on first start.
+
+#### 👥 New commands: `/players`, `/maxplayers`
+
+- `/players` (also `/list`, `#players`): anyone can use it. It privately lists the room: code, host, players/limit, and each player's number, name, friend code and latency. Long lists are split into several messages.
+- `/maxplayers <n>` (also `/maxplayer`, `/max`, `#maxplayers`): the host changes the room size in the lobby (5–127, not below the current player count), and the change is synced to the whole room.
+- Both are listed in `/help`.
+
+#### 📢 The game's own report button now reaches the server
+
+- When vanilla or modded players use the report button next to the chat box, the report lands in the panel's "Reports" page, in the same list as `/report` (marked "in-game report button" with the reason).
+- The game shows "reported" as usual. Reporting the same player again within 60 s, or more than 5 times a minute, answers "rate limited".
+- The interactive `/report` command is unchanged.
+
+#### 🤖 QQ bot now runs through AstrBot (OneBot removed)
+
+- The OneBot/NapCat connection is gone; QQ messages now go through **AstrBot**, which can connect to the **official QQ bot** platform directly.
+- Sending: `/m` room reports, scheduled announcements and subscription reminders go out through AstrBot's OpenAPI (`POST /api/v1/im/messages`, with the older `/im/message` as a fallback) to the sessions (UMOs) entered in the panel.
+- Group commands: a companion AstrBot plugin, [`astrbot_plugin_fmpostor`](https://github.com/SailingBoat-ovo/astrbot_plugin_fmpostor) (also included in the release), forwards `#在线状态` / `#订阅` / `#退订` / `#帮助` to the server, authenticated with a bridge token.
+- `#订阅` reminders are now sent back to the group where the user subscribed (the official QQ bot cannot DM members it only knows from a group).
+- For the official QQ bot to post on its own in a group, the group owner must enable "allow the bot to speak proactively in group chat". Replies to group commands are not affected.
+- ⚠️ After upgrading, re-enter the QQ settings in the panel (AstrBot address, API key, target sessions). The old OneBot address and group numbers are no longer used, and old subscriptions are not migrated.
+
+#### 📱 Phone (portrait) layout for the panel
+
+- At widths of 760 px or less the panel switches to a phone layout: ☰ slide-out menu, bottom navigation (Rooms / Players / Chat / Reports / More) and a compact top bar.
+- Tables become cards (one card per row, with column names), forms use one column, buttons and inputs are bigger, inputs no longer trigger iOS auto-zoom, and dialogs are full-screen.
+- The desktop layout is unchanged.
 
 ### Turbo-700.0-20261024
 

@@ -6,10 +6,11 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <!-- Turbo-700 Enterprise UI. CSP 基线：面板使用内联处理器与用户自定义服务器地址 -->
+  <!-- Max-800 Enterprise UI. CSP 基线：面板使用内联处理器与用户自定义服务器地址 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>帆船控制台 · Among Us 服务器管理</title>
-  <link rel="stylesheet" href="css/style.css?v=7001114">
+  <link rel="stylesheet" href="css/style.css?v=8001122">
+  <link rel="stylesheet" href="css/mobile.css?v=8001122">
 </head>
 <body>
 
@@ -37,7 +38,7 @@
           <div class="login-head">
             <div class="brand-mark">⚓</div>
             <h2>登录控制台</h2>
-            <p>连接到你的帆船服务器 · Turbo-650</p>
+            <p>连接到你的帆船服务器 · Max-800</p>
             <select class="lang-select" style="margin-top:8px;" onchange="setLang(this.value)" title="Language / 语言 / 語言">
               <option value="zh-CN">简体中文</option>
               <option value="zh-TW">繁體中文</option>
@@ -518,7 +519,7 @@
             <div class="card-head"><h3>👋 欢迎语模板</h3></div>
             <div class="card-body">
               <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.8;">
-                占位符：<code>{PLAYER_NAME}</code> 玩家名（旧别名 <code>{Name}</code> 兼容）、<code>{Room}</code> 房间码、<code>{LAST_LOGIN_TIME}</code> 上次登录、<code>{TIME_SINCE_LAST_LOGIN}</code> 距上次登录、<code>{PLAY_TIME}</code> 累计游玩。
+                占位符：<code>{PLAYER_NAME}</code> 玩家名（旧别名 <code>{Name}</code> 兼容）、<code>{Room}</code> 房间码、<code>{LAST_LOGIN_TIME}</code> 上次登录、<code>{TIME_SINCE_LAST_LOGIN}</code> 距上次登录、<code>{PLAY_TIME}</code> 累计游玩、<code>{HITOKOTO}</code> 一言（随机一句话）、<code>{HITOKOTO_FROM}</code> 一言出处。
                 支持 Among Us 富文本：<code>&lt;color=#FFD700&gt;欢迎&lt;/color&gt;</code>、<code>&lt;size=150%&gt;大字&lt;/size&gt;</code> 等。
               </div>
               <div class="form-row">
@@ -550,6 +551,34 @@
                 <button class="btn btn-primary btn-sm" onclick="addWelcomeMsg()">+ 添加</button>
               </div>
               <div id="welcomeMsgsBox" style="display:flex;flex-direction:column;gap:6px;"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>🍾 一言（每小时的漂流瓶）</h3></div>
+            <div class="card-body">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.8;">
+                全服共用一句「当前一言」，按间隔自动从接口刷新；每次发欢迎语时按概率改用一条自定义一言。
+                欢迎语里写 <code>{HITOKOTO}</code> 句子、<code>{HITOKOTO_FROM}</code> 出处（旧写法 <code>&lt;YY&gt;</code> / <code>&lt;ZZ&gt;</code> 同样有效）；没写的话可以自动加在末尾。
+              </div>
+              <div id="hitokotoCurrent" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;font-size:13px;margin-bottom:12px;white-space:pre-wrap;word-break:break-word;">加载中…</div>
+              <div class="form-row">
+                <div class="form-group"><label>一言</label><select id="hitokotoEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
+                <div class="form-group"><label>刷新间隔（秒，≥60）</label><input type="number" id="hitokotoInterval" min="60" step="60" value="3600"></div>
+                <div class="form-group"><label>自定义一言概率（%）</label><input type="number" id="hitokotoChance" min="0" max="100" step="1" value="5"></div>
+                <div class="form-group"><label>欢迎语没写占位符时</label><select id="hitokotoAppend"><option value="true">自动加在末尾</option><option value="false">不加</option></select></div>
+              </div>
+              <div class="form-group">
+                <label>一言接口（留空 = 默认 https://v1.hitokoto.cn/）</label>
+                <input type="text" id="hitokotoUrl" placeholder="https://v1.hitokoto.cn/">
+              </div>
+              <div class="form-group">
+                <label>自定义一言（一行一条，格式：<code>句子|出处</code>，出处可省略）</label>
+                <textarea id="hitokotoCustom" rows="6" placeholder="这是一条自定义一言|自定义"></textarea>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="saveHitokoto()">保存</button>
+                <button class="btn" onclick="refreshHitokoto()">立即换一句</button>
+              </div>
             </div>
           </div>
         </div>
@@ -921,18 +950,30 @@
             </div>
           </div>
           <div class="card">
-            <div class="card-head"><h3>📡 QQ 群房间广播（OneBot）</h3></div>
+            <div class="card-head"><h3>📡 QQ 群房间广播（AstrBot）</h3></div>
             <div class="card-body">
-              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.7;">连接 NapCat/OneBot v11 端点（收发共用此地址）。接收模式自动协商：<code>ws://</code>/<code>wss://</code> 始终走正向 WebSocket；<code>http://</code>/<code>https://</code> 会<b>优先尝试同端口 WebSocket</b>（NapCat HTTP 服务器开启"启用Ws"即支持，与原插件相同，实时推送），不可用时自动退回 HTTP 轮询（每 3 秒）。在允许的 QQ 群发送状态命令（默认 <code>#在线状态</code>，面板可添加多个）可查看服务器房间列表；房主可用 <code>/m on|off</code> 控制广播。保存后自动重连。</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.7;">通过 <b>AstrBot</b> 收发 QQ 消息（AstrBot 可直接接入 QQ 官方机器人）。<br>
+                ① 发送：在 AstrBot 面板「设置 → OpenAPI」创建 API Key（勾选 <code>im</code> 权限），填到下方；推送会话填 AstrBot 的会话 ID（UMO，如 <code>qq_official:GroupMessage:xxxx</code>，可在群里发 <code>/sid</code> 获取）。<br>
+                ② 接收群命令：在 AstrBot 安装 <code>astrbot_plugin_fmpostor</code> 插件，填入本服务端地址和下方的桥接口令。<br>
+                QQ 官方机器人在群里主动发言（/m 推送、定时公告、订阅提醒）需要群主在群设置里打开「机器人主动在群聊内发言」；群命令的回复不受此限制。</div>
               <div class="form-row">
                 <div class="form-group"><label>启用</label><select id="monitorEnabled"><option value="true">开启</option><option value="false">关闭</option></select></div>
-                <div class="form-group"><label>OneBot 地址</label><input type="text" id="monitorUrl" placeholder="如 http://127.0.0.1:3001（或 ws://…）" style="font-family:var(--mono);"></div>
-                <div class="form-group"><label>Token（可选）</label><input type="text" id="monitorToken" placeholder="access_token" style="font-family:var(--mono);"></div>
+                <div class="form-group"><label>AstrBot 地址</label><input type="text" id="monitorAstrUrl" placeholder="如 http://127.0.0.1:6185" style="font-family:var(--mono);"></div>
+                <div class="form-group"><label>AstrBot API Key</label><input type="text" id="monitorAstrKey" placeholder="abk_…（需要 im 权限）" style="font-family:var(--mono);"></div>
+              </div>
+              <div class="form-group">
+                <label>推送会话（一行一个 UMO；/m 房间报告、定时公告发到这些会话）</label>
+                <textarea id="monitorSessions" rows="3" placeholder="qq_official:GroupMessage:XXXXXXXX" style="font-family:var(--mono);"></textarea>
               </div>
               <div class="form-row">
-                <div class="form-group"><label>允许的 QQ 群号（逗号分隔）</label><input type="text" id="monitorGroups" placeholder="如 123456,789012"></div>
+                <div class="form-group"><label>桥接口令（填到 AstrBot 插件配置里）</label>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;"><input type="text" id="monitorBridgeToken" readonly style="flex:1;min-width:180px;font-family:var(--mono);"><button class="btn btn-sm" onclick="copyBridgeToken()">复制</button><button class="btn btn-sm" onclick="regenBridgeToken()">重新生成</button></div>
+                </div>
                 <div class="form-group"><label>服务器名称</label><input type="text" id="monitorServerName" placeholder="帆船 AmongUs 服务器"></div>
-                <div class="form-group" style="flex:0 0 auto;"><label>&nbsp;</label><button class="btn btn-primary" onclick="saveMonitorSettings()">保存</button></div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                <button class="btn btn-primary" onclick="saveMonitorSettings()">保存</button>
+                <button class="btn" onclick="testMonitorSend()">发送测试消息</button>
               </div>
               <div class="form-row">
                 <div class="form-group" style="flex:2;"><label>状态命令（群内发这些命令即回报房间列表；多个用逗号分隔，默认 #在线状态）<a href="javascript:void(0)" onclick="resetStatusTriggers()" style="font-size:11px;margin-left:8px;">恢复默认</a></label><input type="text" id="monitorStatusTriggers" placeholder="#在线状态" style="font-family:var(--mono);"></div>
@@ -948,11 +989,11 @@
                   <textarea id="monitorStatusReplyTemplate" class="rich-input" rows="5" style="width:100%;"></textarea>
                 </div>
               </div>
-              <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:10px;">群内命令：<code>#在线状态</code>（或面板配置的其它状态命令）房间报告 · <code>#订阅 房间号</code> 游戏结束私信提醒 · <code>#退订 房间号</code> · <code>#帮助</code>。房主游戏内 <code>/m</code> 推送房间报告，<code>/m 备注</code> 报告中本房间附一次性备注。</div>
+              <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:10px;">群内命令（经 AstrBot 插件转发）：<code>#在线状态</code>（或面板配置的其它状态命令）房间报告 · <code>#订阅 房间号</code> 游戏结束后在原群提醒 · <code>#退订 房间号</code> · <code>#帮助</code>。房主游戏内 <code>/m</code> 推送房间报告，<code>/m 备注</code> 报告中本房间附一次性备注。</div>
             </div>
           </div>
           <div class="card">
-            <div class="card-head"><h3>📊 QQ 群广播统计</h3><span class="card-desc">QQ 侧记录发送者QQ号+群号；游戏内 /m 记录好友代码+玩家名</span><div class="spacer" style="flex:1;"></div><button class="btn btn-ghost btn-sm" onclick="clearBStats()">🗑 清空统计</button></div>
+            <div class="card-head"><h3>📊 QQ 群广播统计</h3><span class="card-desc">QQ 侧记录发送者昵称与命令；游戏内 /m 记录好友代码+玩家名</span><div class="spacer" style="flex:1;"></div><button class="btn btn-ghost btn-sm" onclick="clearBStats()">🗑 清空统计</button></div>
             <div class="card-body" style="padding:0;">
               <div style="max-height:360px;overflow:auto;">
                 <table class="data-table"><thead><tr><th>时间</th><th>来源</th><th>发送者 / 订阅者</th><th>群号</th><th>内容</th><th></th></tr></thead><tbody id="bStatsBody"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody></table>
@@ -1176,11 +1217,12 @@
       </div>
     </div>
   </div>
-  <script src="js/i18n.js?v=7001024"></script>
-  <script src="js/i18n-extra.js?v=7001024"></script>
-  <script src="js/i18n-extra2.js?v=7001024"></script>
-  <script src="js/i18n-extra3.js?v=7001024"></script>
-  <script src="js/i18n-extra4.js?v=7001024"></script>
-  <script src="js/app.js?v=7001115"></script>
+  <script src="js/i18n.js?v=8001122"></script>
+  <script src="js/i18n-extra.js?v=8001122"></script>
+  <script src="js/i18n-extra2.js?v=8001122"></script>
+  <script src="js/i18n-extra3.js?v=8001122"></script>
+  <script src="js/i18n-extra4.js?v=8001122"></script>
+  <script src="js/app.js?v=8001122"></script>
+  <script src="js/mobile.js?v=8001122"></script>
 </body>
 </html>

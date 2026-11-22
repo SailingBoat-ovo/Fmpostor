@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Fmpostor.Server.WebAdmin;
 
@@ -38,6 +38,11 @@ public class WebAdminConfig
     public string WelcomeFile { get; set; } = "webadmin_welcome.json";
 
     /// <summary>
+    ///     一言(欢迎语里的随机一句话)设置文件。
+    /// </summary>
+    public string HitokotoFile { get; set; } = "webadmin_hitokoto.json";
+
+    /// <summary>
     ///     In-game report file.
     /// </summary>
     public string ReportFile { get; set; } = "webadmin_reports.json";
@@ -53,7 +58,7 @@ public class WebAdminConfig
     public string PlayerTimesFile { get; set; } = "webadmin_player_times.json";
 
     /// <summary>
-    ///     QQ room monitor (OneBot) settings file — hot reloadable.
+    ///     QQ room monitor (AstrBot) settings file — hot reloadable.
     /// </summary>
     public string RoomMonitorFile { get; set; } = "webadmin_monitor.json";
 

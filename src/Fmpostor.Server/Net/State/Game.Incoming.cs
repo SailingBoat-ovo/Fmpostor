@@ -68,6 +68,7 @@ namespace Fmpostor.Server.Net.State
             // 会议窗口与未确认的重连都只属于本局。
             ResetMeetingWindow();
             ResetUnconfirmedResumes();
+            ResetMeetingJoins();
 
             GameState = GameStates.Ended;
 
@@ -104,9 +105,9 @@ namespace Fmpostor.Server.Net.State
             await _eventManager.CallAsync(new GameAlterEvent(this, isPublic));
         }
 
-        public async ValueTask HandleRemovePlayer(int playerId, DisconnectReason reason, bool skipReserve = false)
+        public async ValueTask HandleRemovePlayer(int playerId, DisconnectReason reason, bool skipReserve = false, bool voluntaryLeave = false)
         {
-            var deferred = await PlayerRemove(playerId, skipReserve: skipReserve);
+            var deferred = await PlayerRemove(playerId, skipReserve: skipReserve, voluntaryLeave: voluntaryLeave);
 
             // When the removal was deferred for a possible reconnect, the slot is
             // still alive: do not announce the leave to the room, otherwise the
@@ -125,6 +126,47 @@ namespace Fmpostor.Server.Net.State
             using var packet = MessageWriter.Get(MessageType.Reliable);
             WriteRemovePlayerMessage(packet, false, playerId, reason);
             await SendToAllExceptAsync(packet, playerId);
+        }
+
+        /// <summary>
+        ///     A player used the game's report menu (the button next to the chat box).
+        /// </summary>
+        /// <remarks>
+        ///     原版和模组客户端用的是同一个举报菜单, 都会走到这里。
+        ///     举报交给事件监听者处理(面板的举报列表、限流), 然后把结果回给举报者,
+        ///     游戏里会弹出"已举报"或相应的失败原因。举报自己按"未知"处理。
+        /// </remarks>
+        public async ValueTask HandleReportPlayerAsync(ClientPlayer reporter, int targetClientId, ReportReasons reason)
+        {
+            var target = targetClientId == reporter.Client.Id ? null : GetClientPlayer(targetClientId);
+
+            var @event = new GamePlayerReportEvent(this, reporter, target, targetClientId, reason);
+            if (targetClientId == reporter.Client.Id)
+            {
+                @event.Outcome = ReportOutcome.NotReportedUnknown;
+            }
+            else
+            {
+                await _eventManager.CallAsync(@event);
+            }
+
+            var targetName = target?.Character?.PlayerInfo?.PlayerName;
+            if (string.IsNullOrWhiteSpace(targetName))
+            {
+                targetName = target?.Client.Name ?? string.Empty;
+            }
+
+            using var message = MessageWriter.Get(MessageType.Reliable);
+            Fmpostor.Api.Net.Messages.S2C.Message17ReportPlayerS2C.Serialize(message, false, targetClientId, reason, @event.Outcome, targetName);
+            await SendToAsync(message, reporter.Client.Id);
+
+            _logger.LogInformation(
+                "{0} - Player {1} reported client {2} ({3}): {4}.",
+                Code,
+                reporter.Client.Name,
+                targetClientId,
+                reason,
+                @event.Outcome);
         }
 
         public async ValueTask HandleKickPlayer(int playerId, bool isBan)
@@ -304,7 +346,15 @@ namespace Fmpostor.Server.Net.State
             // their original slot, instead of being treated as a late joiner.
             if (isResume && resumeSlot != null)
             {
-                await HandleJoinGameResume(player, resumeSlot);
+                if (UseMeetingJoin)
+                {
+                    await HandleJoinGameResumeInMeeting(player, resumeSlot);
+                }
+                else
+                {
+                    await HandleJoinGameResume(player, resumeSlot);
+                }
+
                 return GameJoinResult.CreateSuccess(player);
             }
 
@@ -321,6 +371,12 @@ namespace Fmpostor.Server.Net.State
             // 全新玩家加入已开始的对局: 走观战路径(中立观战职业 + 固定为灵魂)。
             if (joinAsSpectator)
             {
+                // 会议中也立刻判为观战者(当场发观战职业、当场要身体); 散会后再检查一次。
+                if (UseMeetingJoin)
+                {
+                    DeferSpectatorToMeetingEnd(player);
+                }
+
                 await AdmitAsSpectatorAsync(player);
             }
 

@@ -479,6 +479,13 @@ select[multiple] { background-image: none; padding-right: 12px; }
 .modal h2 { font-size: 17px; font-weight: 650; margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
 .modal .form-group { margin-bottom: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
+/* 自绘确认框 / 输入框(替代浏览器 confirm/prompt), 叠在其它弹窗之上 */
+.ui-dialog-overlay { z-index: 260; }
+.ui-dialog { width: 420px; }
+.ui-dialog h2 { margin-bottom: 12px; }
+.ui-dialog-message { color: var(--text-secondary); font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.ui-dialog .form-group { margin-top: 14px; margin-bottom: 0; }
+.ui-dialog .form-group input { width: 100%; }
 
 /* ---------- 通知 ---------- */
 .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }

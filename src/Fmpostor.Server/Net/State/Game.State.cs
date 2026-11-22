@@ -30,7 +30,7 @@ namespace Fmpostor.Server.Net.State
             await _eventManager.CallAsync(new GamePlayerJoinedEvent(this, player));
         }
 
-        private async ValueTask<bool> PlayerRemove(int playerId, bool isBan = false, bool fromKick = false, bool skipReserve = false)
+        private async ValueTask<bool> PlayerRemove(int playerId, bool isBan = false, bool fromKick = false, bool skipReserve = false, bool voluntaryLeave = false)
         {
             if (!_players.TryGetValue(playerId, out var pendingPlayer))
             {
@@ -58,13 +58,25 @@ namespace Fmpostor.Server.Net.State
             {
                 _unconfirmedResumes.TryRemove(playerId, out _);
                 _resumeConfirmScheduled.TryRemove(playerId, out _);
+                _meetingResumes.TryRemove(playerId, out _);
+                _meetingSpectators.TryRemove(playerId, out _);
             }
-            else if (TryHandBackUnconfirmedResume(playerId, isBan, kickBlocksReserve))
+            else if (TryHandBackMeetingResume(playerId, isBan, kickBlocksReserve)
+                     || TryHandBackUnconfirmedResume(playerId, isBan, kickBlocksReserve))
             {
+                // 会议中进来、还没续局就离开的重连者, 或未确认的重连: 保槽原样还回去。
                 skipReserve = true;
             }
 
-            if (!skipReserve && !isBan && !kickBlocksReserve && TryDeferReconnectSlot(pendingPlayer, playerId))
+            // 玩家自己退出(客户端主动发来断开请求, 例如点了"离开游戏"): 不是掉线, 不保留位置。
+            //   只有超时 / 网络错误这类非主动断开才进入保槽。
+            //   (上面"还回会议中进入 / 未确认重连的保槽"不受影响: 插件为了保住位置主动退出时走那条路。)
+            if (voluntaryLeave && !skipReserve)
+            {
+                _logger.LogInformation("{0} - Player {1} left on their own (client disconnect request); no reconnect slot kept.", Code, playerId);
+            }
+
+            if (!skipReserve && !isBan && !kickBlocksReserve && !voluntaryLeave && TryDeferReconnectSlot(pendingPlayer, playerId))
             {
                 return true;
             }

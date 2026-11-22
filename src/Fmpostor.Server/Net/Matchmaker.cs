@@ -76,22 +76,44 @@ namespace Fmpostor.Server.Net
         /// <summary>
         ///     Starts a UDP listener on a dynamically allocated delta port.
         /// </summary>
-        public async ValueTask StartDeltaListenerAsync(int port)
+        public async ValueTask<bool> StartDeltaListenerAsync(int port)
         {
             if (_mainEndPoint == null)
             {
                 _logger.LogError("Matchmaker cannot start delta listener: main endpoint not initialized");
-                return;
+                return false;
             }
 
+            await _deltaStartLock.WaitAsync();
+            try
+            {
+                return await StartDeltaListenerCoreAsync(port);
+            }
+            finally
+            {
+                _deltaStartLock.Release();
+            }
+        }
+
+        /// <summary>Serialises listener start-up so two token requests cannot bind the same port twice.</summary>
+        private readonly System.Threading.SemaphoreSlim _deltaStartLock = new(1, 1);
+
+        private async ValueTask<bool> StartDeltaListenerCoreAsync(int port)
+        {
             if (_deltaListeners.ContainsKey(port))
             {
                 _logger.LogDebug("Matchmaker delta listener for port {Port} already running", port);
-                return;
+                return true;
             }
 
-            var ep = new IPEndPoint(_mainEndPoint.Address, port);
-            var mode = _mainEndPoint.AddressFamily switch
+            var main = _mainEndPoint;
+            if (main == null)
+            {
+                return false;
+            }
+
+            var ep = new IPEndPoint(main.Address, port);
+            var mode = main.AddressFamily switch
             {
                 AddressFamily.InterNetwork => IPMode.IPv4,
                 AddressFamily.InterNetworkV6 => IPMode.IPv6,
@@ -108,12 +130,14 @@ namespace Fmpostor.Server.Net
                 await listener.StartAsync();
                 _deltaListeners[port] = listener;
                 _logger.LogInformation("Matchmaker delta UDP listener started on port {Port}", port);
+                return true;
             }
-            catch (SocketException ex)
+            catch (Exception ex)
             {
                 _logger.LogError(ex, "Matchmaker failed to start delta listener on port {Port} (may be in use)", port);
-                // Return the port — it's unusable.
-                _portPool.ReturnPort(port);
+                // The port is unusable (taken by another program): keep it out of the pool.
+                _portPool.MarkPortUnusable(port);
+                return false;
             }
         }
 

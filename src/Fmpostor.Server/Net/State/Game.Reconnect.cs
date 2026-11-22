@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -65,6 +65,24 @@ namespace Fmpostor.Server.Net.State
             {
                 if (!Reconnect.Enabled)
                 {
+                    return false;
+                }
+
+                // 只服务装了断线重连插件的房间: 房主从没声明过(原版 / 其他模组)时不保槽,
+                //   掉线就是普通离开, 身体不会被留在房间里。这类房间里续局也无法完成
+                //   (需要房主的插件补生成身体), 保槽只会让其他人看到一个"卡住的玩家"。
+                if (!RoomUsesResume)
+                {
+                    return false;
+                }
+
+                // 房主在设置里关掉了断线重连: 不保槽, 掉线即离开。
+                if (HostDisabledReconnect)
+                {
+                    _logger.LogInformation(
+                        "Reconnect: host disabled reconnect for this room; {Name} (clientId {ClientId}) leaves normally.",
+                        player.Client.Name,
+                        playerId);
                     return false;
                 }
 
@@ -791,6 +809,8 @@ namespace Fmpostor.Server.Net.State
                 PlayerId = slot.Snapshot.PlayerId,
                 OldClientId = slot.Snapshot.OldClientId,
                 PlayerName = slot.Snapshot.PlayerName,
+                FriendCode = slot.Snapshot.FriendCode,
+                DisconnectedAt = slot.Snapshot.DisconnectedAt,
                 Sent = 0,
             };
 
@@ -818,6 +838,11 @@ namespace Fmpostor.Server.Net.State
 
             public string PlayerName { get; init; } = string.Empty;
 
+            public string FriendCode { get; init; } = string.Empty;
+
+            /// <summary>掉线时刻: 用来判断"掉线之后有没有开过会"(决定散会后的落位)。</summary>
+            public DateTimeOffset DisconnectedAt { get; init; }
+
             /// <summary>Set once the host has been told to spawn the body.</summary>
             public int DirectiveSent;
 
@@ -840,6 +865,9 @@ namespace Fmpostor.Server.Net.State
 
             await FlushPendingResumeSignalAsync(clientId, trigger);
             await FlushPendingModStateRestoreAsync(clientId, trigger);
+
+            // 会议中进来的重连者: 身体一到就告诉它这场会议以旧身份投票。
+            await TrySendMeetingSeatAsync(clientId, trigger);
 
             // 该连接刚有身体 —— 名册只在"变化时"广播, 它进来时可能不在场(收不到),
             // 所以这里单播补发一次完整名册。
@@ -1029,6 +1057,15 @@ namespace Fmpostor.Server.Net.State
 
         /// <summary>Spectator limit chosen by the host. 0 = none.</summary>
         private int _spectatorLimit;
+
+        /// <summary>
+        ///     房主装了插件、但在设置里关掉了「帆船服断线重连」: 声明过能力, 却没有重连位。
+        ///     这时掉线不保槽, 按普通离开处理。没装插件(从未声明)的房间不受影响。
+        /// </summary>
+        internal bool RoomUsesResume => _roomProtocolVersion > 0;
+
+        internal bool HostDisabledReconnect =>
+            _roomProtocolVersion > 0 && (_roomCapability & NebulaResumeRpc.CapabilityReconnect) == 0;
 
         /// <summary>
         ///     Records a capability declaration from the host.
@@ -1318,6 +1355,14 @@ namespace Fmpostor.Server.Net.State
             await SendSpectatorFlagAsync(clientId);
 
             // ② 补生成身体 —— 只发一次。重复发送会让房主再生成一具身体(残影)。
+            //   会议中也立刻发: 支持会议中进入的房主会在会议里照常生成观战者的身体
+            //   (观战者要有身体才能和死者聊天)。散会后后台循环再检查一次, 已发过的不会重发。
+            if (UseMeetingJoin)
+            {
+                _meetingSpectators[clientId] = 0;
+                EnsureMeetingJoinLoop();
+            }
+
             if (_spectatorBodyRequested.Add(clientId))
             {
                 await SendSpawnDirectiveForAsync(clientId, player.Client.Name);
@@ -1720,20 +1765,34 @@ namespace Fmpostor.Server.Net.State
                 // 载体 = 接收者自己的角色, 这是唯一同时满足
                 // "接收端本地存在" 与 "类型是 PlayerControl" 的对象。
                 var targetNetId = current.Character.NetId;
+                var meetingSince = MeetingHappenedSince(pending.DisconnectedAt);
 
                 using (var writer = StartRpc(targetNetId, (RpcCalls)NebulaResumeRpc.RpcId, clientId))
                 {
                     writer.Write(wire.ProcessHash);
 
-                    // count = 后面跟的 int 个数。本帧就是 [KindResume, playerId] 两个,
-                    // 写大了客户端会越过消息末尾读垃圾。
-                    writer.Write(2);
+                    // count = 后面跟的 int 个数。本帧是 [KindResume, playerId, 掉线后开过会] 三个,
+                    // 写大了客户端会越过消息末尾读垃圾。旧客户端只读前两个, 第三个被忽略。
+                    writer.Write(3);
                     writer.Write(NebulaResumeRpc.KindResume);
                     writer.Write((int)pending.PlayerId);
+                    writer.Write(meetingSince ? 1 : 0);
                     await FinishRpcAsync(writer, clientId);
                 }
 
                 _pendingResumeSignals.TryRemove(clientId, out _);
+
+                _logger.LogInformation(
+                    "Reconnect: {Name} 掉线后{Meeting}。",
+                    pending.PlayerName,
+                    meetingSince ? "开过会 → 散会后不回掉线处, 用会议桌默认位置" : "没开过会 → 恢复掉线位置");
+
+                // 全场横幅: "名字 (好友代码) 重连回本局游戏。"
+                //   会议中进来的人在进会议时已经提示过, 散会后的正式续局不再重复。
+                if (!_rejoinNoticeSent.TryRemove(clientId, out _))
+                {
+                    await BroadcastRejoinNoticeAsync(targetNetId, wire.ProcessHash, pending.PlayerId, pending.PlayerName, pending.FriendCode);
+                }
 
                 _logger.LogInformation(
                     "Reconnect: sent resume signal for {Name} (playerId {PlayerId}) to client {ClientId} via netId {NetId} (trigger: {Trigger}).",
@@ -1747,6 +1806,66 @@ namespace Fmpostor.Server.Net.State
             {
                 _logger.LogError(ex, "Reconnect: failed to send the resume signal.");
             }
+        }
+
+        /// <summary>
+        ///     掉线之后是否开过会: 掉线后有会议开始, 或掉线时会议正在进行(之后才结束), 或现在仍在会议窗口。
+        /// </summary>
+        private bool MeetingHappenedSince(DateTimeOffset disconnectedAt)
+        {
+            if (disconnectedAt == default)
+            {
+                return false;
+            }
+
+            var disc = disconnectedAt.UtcTicks;
+            return _meetingHudAlive
+                || Interlocked.Read(ref _meetingOpenedAtTicks) >= disc
+                || Interlocked.Read(ref _meetingClosedAtTicks) >= disc
+                || Interlocked.Read(ref _meetingFlowEndedAtTicks) >= disc;
+        }
+
+        /// <summary>
+        ///     向全场广播重连横幅 kind=16: <c>[16, playerId, 名字长度, 名字..., 好友代码长度, 好友代码...]</c>。
+        ///     载体 = 重连者自己的角色(每个客户端本地都有)。字符串按 UTF-16 码元逐个写成 int。
+        /// </summary>
+        /// <summary>已经在会议中提示过重连横幅的连接(散会后的续局不再重复)。</summary>
+        private readonly ConcurrentDictionary<int, byte> _rejoinNoticeSent = new();
+
+        private async ValueTask BroadcastRejoinNoticeAsync(uint carrierNetId, int processHash, byte playerId, string playerName, string friendCode)
+        {
+            try
+            {
+                var name = Clip(playerName, 32);
+                var code = Clip(friendCode, 32);
+
+                using (var writer = StartRpc(carrierNetId, (RpcCalls)NebulaResumeRpc.RpcId))
+                {
+                    writer.Write(processHash);
+                    writer.Write(4 + name.Length + code.Length);
+                    writer.Write(NebulaResumeRpc.KindRejoinNotice);
+                    writer.Write((int)playerId);
+                    writer.Write(name.Length);
+                    foreach (var c in name)
+                    {
+                        writer.Write((int)c);
+                    }
+
+                    writer.Write(code.Length);
+                    foreach (var c in code)
+                    {
+                        writer.Write((int)c);
+                    }
+
+                    await FinishRpcAsync(writer);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Reconnect: 重连横幅广播失败 ({Name})。", playerName);
+            }
+
+            static string Clip(string? s, int max) => string.IsNullOrEmpty(s) ? string.Empty : (s.Length > max ? s.Substring(0, max) : s);
         }
 
         /// <summary>

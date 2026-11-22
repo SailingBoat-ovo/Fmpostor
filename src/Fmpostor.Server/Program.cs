@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -207,6 +207,9 @@ namespace Fmpostor.Server
                     services.AddSingleton<DeltaPortPoolService>();
                     services.AddSingleton<BadWordFilterService>();
                     services.AddSingleton<WelcomeService>();
+                    services.AddSingleton<HitokotoService>();
+                    services.AddHostedService(p => p.GetRequiredService<HitokotoService>());
+                    services.AddSingleton<RoomInfoCommandService>();
                     services.AddSingleton<ReportService>();
                     services.AddSingleton<PlayerLogService>();
                     services.AddSingleton<ReconnectLogService>();
@@ -233,7 +236,7 @@ namespace Fmpostor.Server
 
                     // Turbo520 integrated plugin features: titles (/title),
                     // play-time tracking (welcome data), auto-start (/auto),
-                    // QQ room monitor (/m + OneBot), host transfer (/nexthost).
+                    // QQ room monitor (/m + AstrBot), host transfer (/nexthost).
                     services.AddSingleton<PlayerTimeService>();
                     services.AddHostedService(p => p.GetRequiredService<PlayerTimeService>());
                     services.AddSingleton<TitleService>();
@@ -405,7 +408,7 @@ namespace Fmpostor.Server
         }
 
         /// <summary>Current build version shown in the startup panel and the web panel.</summary>
-        private const string DisplayVersion = "Turbo-700.0-20261024";
+        private const string DisplayVersion = "Max-800.0-20261122";
 
         /// <summary>
         ///     Prints the startup panel.
@@ -438,75 +441,87 @@ namespace Fmpostor.Server
                 // 读配置失败不该影响启动, 面板用默认值继续画。
             }
 
-            const int width = 58; // 内框宽度(不含左右边框)
+            // 与"帆船AmongUs服务器工具箱"同一套视觉: UTF-8 输出、窗口标题、彩虹 FANCHUAN 大字、
+            //   分隔线 + 彩色标题、彩色条目。用控制台自带颜色, 不依赖终端是否支持 ANSI 转义;
+            //   输出被重定向(日志文件 / systemd)时颜色自动失效, 文字照常。
+            try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+            try { Console.Title = "帆船AmongUs服务器 " + version; } catch { }
+
+            Console.WriteLine();
+            Console.WriteLine();
+
+            var art = new[]
+            {
+                ("███████╗ █████╗ ███╗   ██╗ ██████╗██╗  ██╗██╗   ██╗ █████╗ ███╗   ██╗", ConsoleColor.Magenta),
+                ("██╔════╝██╔══██╗████╗  ██║██╔════╝██║  ██║██║   ██║██╔══██╗████╗  ██║", ConsoleColor.Cyan),
+                ("█████╗  ███████║██╔██╗ ██║██║     ███████║██║   ██║███████║██╔██╗ ██║", ConsoleColor.Green),
+                ("██╔══╝  ██╔══██║██║╚██╗██║██║     ██╔══██║██║   ██║██╔══██║██║╚██╗██║", ConsoleColor.Yellow),
+                ("██║     ██║  ██║██║ ╚████║╚██████╗██║  ██║╚██████╔╝██║  ██║██║ ╚████║", ConsoleColor.Red),
+                ("╚═╝     ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝", ConsoleColor.DarkYellow),
+            };
+
+            foreach (var (line, color) in art)
+            {
+                ColorWrite("   " + line, color);
+            }
 
             Console.WriteLine();
 
-            WriteBorder('╔', '═', '╗', width, ConsoleColor.DarkCyan);
-            WritePanelLine("帆船 Impostor 服务端", width, ConsoleColor.Cyan, center: true);
-            WritePanelLine(version, width, ConsoleColor.DarkGray, center: true);
+            const string rule = "   =============================================";
+            ColorWrite(rule, ConsoleColor.Magenta);
+            WriteSegments(
+                ("            丨", ConsoleColor.Cyan),
+                ("帆船", ConsoleColor.Green),
+                ("AmongUs", ConsoleColor.Yellow),
+                ("服务器", ConsoleColor.Red),
+                ("丨", ConsoleColor.DarkMagenta));
+            ColorWrite(rule, ConsoleColor.Magenta);
+            ColorWrite(CenterIn(version, DisplayWidth(rule) - 3, "   "), ConsoleColor.Yellow);
+            Console.WriteLine();
 
-            WriteBorder('╠', '═', '╣', width, ConsoleColor.DarkCyan);
-
-            WritePanelLine($"  监听端口   {listenPort}", width, ConsoleColor.Gray);
-            WritePanelLine($"  公网地址   {publicIp}:{listenPort}", width, ConsoleColor.Gray);
-            WritePanelLine($"  HTTP 服务  {(httpEnabled ? "已启用" : "已禁用")}", width, ConsoleColor.Gray);
-            WritePanelLine($"  配置文件   {(configExists ? "已加载" : "未找到(使用默认值)")}", width,
-                configExists ? ConsoleColor.Gray : ConsoleColor.Yellow);
-
-            WriteBorder('╠', '═', '╣', width, ConsoleColor.DarkCyan);
-
-            WritePanelLine("  状态      正在启动…", width, ConsoleColor.Yellow);
-
-            WriteBorder('╚', '═', '╝', width, ConsoleColor.DarkCyan);
+            WriteItem("监听端口", listenPort.ToString(), ConsoleColor.Green);
+            WriteItem("公网地址", publicIp + ":" + listenPort, ConsoleColor.DarkYellow);
+            WriteItem("HTTP 服务", httpEnabled ? "已启用" : "已禁用", ConsoleColor.Blue);
+            WriteItem("配置文件", configExists ? "已加载" : "未找到(使用默认值)", configExists ? ConsoleColor.Cyan : ConsoleColor.Red);
+            WriteItem("当前状态", "正在启动…", ConsoleColor.Yellow);
 
             Console.WriteLine();
-            WriteHint("提示", "首次运行请检查 config.json 里的 Reconnect 段", ConsoleColor.DarkGray);
-            WriteHint("反馈", "admin@fanchuanovo.cn", ConsoleColor.DarkGray);
+            WriteItem("提示", "首次运行请检查 config.json 里的 Reconnect 段", ConsoleColor.DarkGray);
+            WriteItem("反馈", "admin@fanchuanovo.cn", ConsoleColor.DarkGray);
             Console.WriteLine();
         }
 
-        /// <summary>Writes one horizontal border line with the given corner/joint characters.</summary>
-        private static void WriteBorder(char left, char fill, char right, int width, ConsoleColor color)
+        /// <summary>Writes several coloured pieces on one line.</summary>
+        private static void WriteSegments(params (string Text, ConsoleColor Color)[] parts)
         {
-            Console.ForegroundColor = color;
-            Console.Write(left);
-            Console.Write(new string(fill, width));
-            Console.WriteLine(right);
+            foreach (var (text, color) in parts)
+            {
+                Console.ForegroundColor = color;
+                Console.Write(text);
+            }
+
             Console.ResetColor();
+            Console.WriteLine();
         }
 
-        /// <summary>
-        ///     Writes one panel row, padding by <em>display width</em> so CJK characters keep
-        ///     the right border aligned.
-        /// </summary>
-        private static void WritePanelLine(string text, int width, ConsoleColor color, bool center = false)
+        /// <summary>One menu-style item: "       [●] 标签     值", padded by display width.</summary>
+        private static void WriteItem(string label, string value, ConsoleColor color)
         {
-            var displayWidth = DisplayWidth(text);
-            var padding = Math.Max(0, width - displayWidth);
-
-            var leftPad = center ? padding / 2 : 0;
-            var rightPad = padding - leftPad;
-
+            Console.Write("       ");
             Console.ForegroundColor = color;
-            Console.Write('║');
-            Console.Write(new string(' ', leftPad));
-            Console.Write(text);
-            Console.Write(new string(' ', rightPad));
-            Console.WriteLine('║');
-            Console.ResetColor();
-        }
-
-        /// <summary>Writes a "label  value" hint line under the panel.</summary>
-        private static void WriteHint(string label, string value, ConsoleColor color)
-        {
-            Console.ForegroundColor = color;
-            Console.Write("  ");
-            Console.ForegroundColor = ConsoleColor.DarkCyan;
-            Console.Write(label.PadRight(6));
-            Console.ForegroundColor = color;
+            Console.Write("[●] ");
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.Write(label + new string(' ', Math.Max(1, 10 - DisplayWidth(label))));
+            Console.ForegroundColor = ConsoleColor.White;
             Console.WriteLine(value);
             Console.ResetColor();
+        }
+
+        /// <summary>Centres text within <paramref name="width"/> display cells after a prefix.</summary>
+        private static string CenterIn(string text, int width, string prefix)
+        {
+            var pad = Math.Max(0, (width - DisplayWidth(text)) / 2);
+            return prefix + new string(' ', pad) + text;
         }
 
         /// <summary>

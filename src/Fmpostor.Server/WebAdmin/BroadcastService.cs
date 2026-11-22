@@ -80,6 +80,7 @@ public class BroadcastService : IDisposable
                 {
                     _store = data;
                     if (_store.IntervalMinutes <= 0) _store.IntervalMinutes = 30;
+                    _store.Messages ??= new List<BroadcastMessageItem>();   // 手改 JSON 写成 null 时避免空引用
                     // 一次性文案迁移：旧数据里的"帆船服务器"改为准确表述
                     // （避免玩家误以为这是"帆船服"官方服务器）
                     foreach (var item in _store.Messages)

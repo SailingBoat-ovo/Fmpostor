@@ -455,6 +455,27 @@ namespace Fmpostor.Server.Net.Reconnect
         }
 
         /// <summary>
+        ///     The latest live mod-state blob for a player, if any.
+        /// </summary>
+        /// <remarks>
+        ///     会议中进来的重连者要等散会才恢复; 这期间其他客户端仍在替缺席的旧身份上报状态
+        ///     (例如这场会议里被投出), 续局时要用这份最新的, 而不是掉线那一刻的快照。
+        /// </remarks>
+        public bool TryGetLiveModState(byte playerId, [NotNullWhen(true)] out byte[]? blob, out long seq)
+        {
+            if (_liveModState.TryGetValue(playerId, out var live) && live.Blob.Length > 0)
+            {
+                blob = live.Blob;
+                seq = live.Seq;
+                return true;
+            }
+
+            blob = null;
+            seq = 0;
+            return false;
+        }
+
+        /// <summary>
         ///     Drops the live mod-state entry for a player that has left for good.
         /// </summary>
         public void ForgetLiveModState(byte playerId)

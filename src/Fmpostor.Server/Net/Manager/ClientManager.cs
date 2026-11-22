@@ -165,11 +165,6 @@ namespace Fmpostor.Server.Net.Manager
                 client.Items["Puid"] = identity.Puid;
                 client.Items["FriendCode"] = fc;
                 client.Items["Fid"] = identity.Fid;
-                if (deltaPort > 0)
-                {
-                    client.Items["DeltaPort"] = deltaPort;
-                    _portPool.ConfirmPort(deltaPort);
-                }
 
                 _logger.LogInformation(
                     "[加入] {Name} ({Ip}) PUID:{Puid} FID:{Fid} FriendCode:{FC} Port:{Port}",
@@ -180,6 +175,15 @@ namespace Fmpostor.Server.Net.Manager
                 _logger.LogInformation(
                     "[加入] {Name} ({Ip}) PUID:(none)",
                     name, clientIp);
+            }
+
+            // Every connection that came in on a delta port holds that port's lease while
+            // it is connected (whether or not the identity lookup succeeded), so the
+            // listener is never torn down underneath a live connection.
+            if (deltaPort > 0)
+            {
+                client.Items["DeltaPort"] = deltaPort;
+                _portPool.AttachConnection(deltaPort);
             }
 
             client.Id = id;
@@ -202,10 +206,12 @@ namespace Fmpostor.Server.Net.Manager
             // 那种情况下探测结果被移除也只会让面板回退到 Hazel 的值, 不影响正确性。
             _latencyProbe.Untrack(client.Connection?.EndPoint?.Address);
 
-            // Return the delta port lease so the port can be reused.
-            if (client.Items.TryGetValue("DeltaPort", out var portObj) && portObj is int port && port > 0)
+            // Release this connection's hold on the delta port. The port stays leased to
+            // the player for a while (reconnects land on the same port) and is freed only
+            // after it has been idle; other connections on it are never affected.
+            if (client.Items.Remove("DeltaPort", out var portObj) && portObj is int port && port > 0)
             {
-                _portPool.ReturnPort(port);
+                _portPool.ReleaseConnection(port);
             }
         }
 

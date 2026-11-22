@@ -120,7 +120,7 @@ public class GameTrackerService
     ///     (已用 IL 反编译确认 Impostor.Hazel 1.0.1 里就带这个 50 的下限),
     ///     所以 Hazel 永远不会报出 50 以下的数: 局域网 1~2ms 也只会显示 50。
     /// </remarks>
-    private int ConnectionPing(IClientPlayer p)
+    internal int ConnectionPing(IClientPlayer p)
     {
         return ExactPing(p) ?? (p.IsAwaitingReconnect ? 0 : (p.Client.Connection is HazelConnection hazel ? hazel.DisplayPingMs : 0));
     }

@@ -208,7 +208,13 @@ public class WelcomeService
     ///     {TIME_SINCE_LAST_LOGIN} {PLAY_TIME}.
     ///     第一次来的玩家用 NewPlayerMessage(非空时); 其余情况用模板列表轮流发送。
     /// </summary>
-    public string? Pick(string playerName, string roomCode, PlayerTimeEntry? playerData = null, bool firstVisit = false)
+    public string? Pick(
+        string playerName,
+        string roomCode,
+        PlayerTimeEntry? playerData = null,
+        bool firstVisit = false,
+        HitokotoService.Quote? hitokoto = null,
+        bool appendWhenMissing = false)
     {
         lock (_lock)
         {
@@ -247,6 +253,8 @@ public class WelcomeService
             // name cannot inject Unity rich-text formatting into announcements.
             var safeName = (playerName ?? string.Empty).Replace('<', '‹').Replace('>', '›');
 
+            template = ApplyHitokoto(template, hitokoto, appendWhenMissing);
+
             return template
                 .Replace("{Name}", safeName, StringComparison.Ordinal)
                 .Replace("{Room}", roomCode, StringComparison.Ordinal)
@@ -255,6 +263,69 @@ public class WelcomeService
                 .Replace("{TIME_SINCE_LAST_LOGIN}", FormatDuration(timeSince), StringComparison.Ordinal)
                 .Replace("{PLAY_TIME}", FormatMinutes(playTimeMinutes), StringComparison.Ordinal);
         }
+    }
+
+    /// <summary>
+    ///     自动追加时使用的一言两行(句子 + 出处), 风格与原来的"每小时漂流瓶"一致。
+    /// </summary>
+    internal const string HitokotoLines = "<color=#FF0000>{HITOKOTO}</color>\n<color=#0000CC>--------{HITOKOTO_FROM}</color>";
+
+    /// <summary>句子占位符: 新写法 {HITOKOTO}, 旧写法 &lt;YY&gt;。</summary>
+    private static readonly string[] TextTokens = { "{HITOKOTO}", "<YY>" };
+
+    /// <summary>出处占位符: 新写法 {HITOKOTO_FROM}, 旧写法 &lt;ZZ&gt;。</summary>
+    private static readonly string[] SourceTokens = { "{HITOKOTO_FROM}", "<ZZ>" };
+
+    /// <summary>
+    ///     Fills the quote placeholders, appending the quote lines when asked to.
+    /// </summary>
+    /// <remarks>
+    ///     · 没有句子(功能关闭)时, 含占位符的行整行去掉, 不会留下空壳;
+    ///     · 句子有但出处为空时, 只含出处占位符的行去掉, 避免一行孤零零的"--------"。
+    /// </remarks>
+    internal static string ApplyHitokoto(string template, HitokotoService.Quote? quote, bool append)
+    {
+        static bool HasAny(string s, string[] tokens) => tokens.Any(t => s.Contains(t, StringComparison.Ordinal));
+
+        if (quote != null && append && !HasAny(template, TextTokens) && !HasAny(template, SourceTokens))
+        {
+            template = template.TrimEnd() + "\n" + HitokotoLines;
+        }
+
+        if (!HasAny(template, TextTokens) && !HasAny(template, SourceTokens))
+        {
+            return template;
+        }
+
+        var lines = template.Split('\n').Where(line =>
+        {
+            var hasText = HasAny(line, TextTokens);
+            var hasSource = HasAny(line, SourceTokens);
+            if (quote == null)
+            {
+                return !hasText && !hasSource;
+            }
+
+            return !(hasSource && !hasText && string.IsNullOrEmpty(quote.Source));
+        });
+
+        var result = string.Join('\n', lines).TrimEnd();
+        if (quote == null)
+        {
+            return result;
+        }
+
+        foreach (var token in TextTokens)
+        {
+            result = result.Replace(token, quote.Text, StringComparison.Ordinal);
+        }
+
+        foreach (var token in SourceTokens)
+        {
+            result = result.Replace(token, quote.Source, StringComparison.Ordinal);
+        }
+
+        return result;
     }
 
     private static string FormatMinutes(int minutes)

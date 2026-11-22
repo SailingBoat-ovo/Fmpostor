@@ -44,7 +44,7 @@ public class WebAdminController : ControllerBase
     private readonly UpdateService _update;
     private readonly ILogger<WebAdminController> _logger;
 
-    private static readonly string PluginVersion = "Turbo-700.0-20261024";
+    private static readonly string PluginVersion = "Max-800.0-20261122";
 
     public WebAdminController(
         GameTrackerService tracker,
@@ -1007,6 +1007,113 @@ public class WebAdminController : ControllerBase
             delaySeconds = snapshot.DelaySeconds,
             newPlayerMessage = snapshot.NewPlayerMessage,
         });
+    }
+
+    // ========== 一言 ==========
+
+    private HitokotoService? Hitokoto => HttpContext.RequestServices.GetService(typeof(HitokotoService)) as HitokotoService;
+
+    /// <summary>
+    /// GET /webadmin/api/hitokoto — settings plus the current shared quote.
+    /// </summary>
+    [HttpGet("api/hitokoto")]
+    public IActionResult GetHitokoto()
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+
+        var service = Hitokoto;
+        if (service == null)
+            return StatusCode(500, new { success = false, message = "Hitokoto service unavailable." });
+
+        var s = service.GetSnapshot();
+        var (quote, at) = service.Current;
+        return Ok(new
+        {
+            success = true,
+            enabled = s.Enabled,
+            updateIntervalSeconds = s.UpdateIntervalSeconds,
+            apiUrl = s.ApiUrl,
+            defaultApiUrl = HitokotoService.DefaultUrl,
+            customChance = s.CustomChance,
+            customList = s.CustomList.Select(e => new { text = e.Text, from = e.From }),
+            appendToWelcome = s.AppendToWelcome,
+            current = quote == null ? null : new { text = quote.Text, from = quote.Source, fetchedAt = at },
+        });
+    }
+
+    /// <summary>
+    /// POST /webadmin/api/hitokoto — update settings (any subset of the GET fields).
+    /// </summary>
+    [HttpPost("api/hitokoto")]
+    public IActionResult UpdateHitokoto([FromBody] JsonElement body)
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+        if (!_auth.IsAdmin(sessionUser))
+            return StatusCode(403, new { success = false, message = "Admin only." });
+
+        var service = Hitokoto;
+        if (service == null)
+            return StatusCode(500, new { success = false, message = "Hitokoto service unavailable." });
+
+        try
+        {
+            static bool? Bool(JsonElement b, string name) =>
+                b.TryGetProperty(name, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False) ? v.GetBoolean() : null;
+
+            int? interval = body.TryGetProperty("updateIntervalSeconds", out var iv) && iv.ValueKind == JsonValueKind.Number ? iv.GetInt32() : null;
+            double? chance = body.TryGetProperty("customChance", out var ch) && ch.ValueKind == JsonValueKind.Number ? ch.GetDouble() : null;
+            string? url = body.TryGetProperty("apiUrl", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : null;
+
+            List<HitokotoEntry>? list = null;
+            if (body.TryGetProperty("customList", out var cl) && cl.ValueKind == JsonValueKind.Array)
+            {
+                list = new List<HitokotoEntry>();
+                foreach (var item in cl.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object)
+                        continue;
+                    var text = item.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                    var from = item.TryGetProperty("from", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(text))
+                        list.Add(new HitokotoEntry { Text = text!, From = from ?? string.Empty });
+                }
+            }
+
+            service.Update(Bool(body, "enabled"), interval, url, chance, list, Bool(body, "appendToWelcome"));
+            _logService.AddLog("hitokoto_update", "Updated hitokoto settings", GetClientIp());
+            return Ok(new { success = true, message = "Hitokoto settings updated." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[WebAdmin] Request to {Path} failed.", Request.Path);
+            return BadRequest(new { success = false, message = "Invalid request: " + ex.GetType().Name + "." });
+        }
+    }
+
+    /// <summary>
+    /// POST /webadmin/api/hitokoto/refresh — fetch a new shared quote now.
+    /// </summary>
+    [HttpPost("api/hitokoto/refresh")]
+    public async Task<IActionResult> RefreshHitokoto()
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+        if (!_auth.IsAdmin(sessionUser))
+            return StatusCode(403, new { success = false, message = "Admin only." });
+
+        var service = Hitokoto;
+        if (service == null)
+            return StatusCode(500, new { success = false, message = "Hitokoto service unavailable." });
+
+        var quote = await service.RefreshAsync();
+        return quote == null
+            ? Ok(new { success = false, message = "接口没有返回可用的一言(或正在刷新中)，继续使用上一句。" })
+            : Ok(new { success = true, text = quote.Text, from = quote.Source });
     }
 
     /// <summary>
@@ -2119,10 +2226,13 @@ public class WebAdminController : ControllerBase
         {
             success = true,
             enabled = s.Enabled,
-            oneBotUrl = s.OneBotUrl,
-            // The QQ bot token is a credential: only ever leave as a masked value.
-            oneBotToken = MaskSecret(s.OneBotToken),
-            allowedGroups = s.AllowedGroups,
+            astrBotUrl = s.AstrBotUrl,
+            // The AstrBot API key is a credential: only ever leave as a masked value.
+            astrBotApiKey = MaskSecret(s.AstrBotApiKey),
+            targetSessions = s.TargetSessions,
+            // 桥接口令要填进 AstrBot 插件的配置, 管理员需要看到原文。
+            bridgeToken = s.BridgeToken,
+            bridgeCommands = _roomMonitor.BridgeCommands(),
             serverName = s.ServerName,
             // Turbo-650: QQ 消息模板（空 = 使用内置默认；面板未修改时在编辑框里显示默认值）
             roomReportTemplate = s.RoomReportTemplate,
@@ -2150,9 +2260,11 @@ public class WebAdminController : ControllerBase
         try
         {
             bool? enabled = body.TryGetProperty("enabled", out var e) ? e.GetBoolean() : null;
-            string? url = body.TryGetProperty("oneBotUrl", out var u) ? u.GetString() : null;
-            string? token = body.TryGetProperty("oneBotToken", out var t) ? t.GetString() : null;
-            List<long>? groups = body.TryGetProperty("allowedGroups", out var g) ? g.Deserialize<List<long>>() : null;
+            string? url = body.TryGetProperty("astrBotUrl", out var u) ? u.GetString() : null;
+            string? token = body.TryGetProperty("astrBotApiKey", out var t) ? t.GetString() : null;
+            List<string>? sessions = body.TryGetProperty("targetSessions", out var g) && g.ValueKind == JsonValueKind.Array
+                ? g.Deserialize<List<string>>()
+                : null;
             string? name = body.TryGetProperty("serverName", out var sn) ? sn.GetString() : null;
             string? reportTpl = body.TryGetProperty("roomReportTemplate", out var rt) ? rt.GetString() : null;
             string? statusTpl = body.TryGetProperty("statusReplyTemplate", out var st) ? st.GetString() : null;
@@ -2165,7 +2277,7 @@ public class WebAdminController : ControllerBase
                 token = null;
             }
 
-            _roomMonitor.UpdateSettings(enabled, url, token, groups, name, reportTpl, statusTpl, statusTriggers);
+            _roomMonitor.UpdateSettings(enabled, url, token, sessions, name, reportTpl, statusTpl, statusTriggers);
             _logService.AddLog("monitor_settings", "Updated room monitor settings", GetClientIp());
             return Ok(new { success = true, message = "Monitor settings saved." });
         }
@@ -2175,6 +2287,98 @@ public class WebAdminController : ControllerBase
             _logger.LogWarning(ex, "[WebAdmin] Request to {Path} failed.", Request.Path);
             return BadRequest(new { success = false, message = "Invalid request: " + ex.GetType().Name + "." });
         }
+    }
+
+    /// <summary>
+    ///     POST /webadmin/api/monitor/test — send a test message to one AstrBot session. Body {"session":"umo"}.
+    /// </summary>
+    [HttpPost("api/monitor/test")]
+    public async Task<IActionResult> TestMonitorSend([FromBody] JsonElement body)
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+        if (!_auth.IsAdmin(sessionUser))
+            return StatusCode(403, new { success = false, message = "Admin only." });
+
+        var session = body.TryGetProperty("session", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
+        if (string.IsNullOrWhiteSpace(session))
+        {
+            session = _roomMonitor.GetSettings().TargetSessions.FirstOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(session))
+            return Ok(new { success = false, message = "没有可测试的会话：请先填写推送会话。" });
+
+        var (ok, detail) = await _roomMonitor.SendTestAsync(session!, "✅ Fmpostor 与 AstrBot 连接测试成功。");
+        return Ok(new { success = ok, message = ok ? "已发送到 " + session : "发送失败：" + detail });
+    }
+
+    /// <summary>POST /webadmin/api/monitor/bridge-token — generate a new bridge token (admin).</summary>
+    [HttpPost("api/monitor/bridge-token")]
+    public IActionResult RegenerateBridgeToken()
+    {
+        var sessionUser = GetSessionUser();
+        if (sessionUser == null)
+            return Unauthorized(new { success = false, message = "Not authenticated." });
+        if (!_auth.IsAdmin(sessionUser))
+            return StatusCode(403, new { success = false, message = "Admin only." });
+
+        var token = _roomMonitor.RegenerateBridgeToken();
+        _logService.AddLog("monitor_settings", "Regenerated AstrBot bridge token", GetClientIp());
+        return Ok(new { success = true, bridgeToken = token });
+    }
+
+    // ========== AstrBot 插件桥接（不走面板登录, 用桥接口令） ==========
+
+    private static readonly FixedWindowRateLimiter BridgeRateLimiter = new(120, TimeSpan.FromMinutes(1));
+
+    private bool BridgeAuthorized()
+    {
+        var token = Request.Headers["X-Bridge-Token"].FirstOrDefault();
+        return _roomMonitor.CheckBridgeToken(token);
+    }
+
+    /// <summary>
+    ///     GET /webadmin/api/bot/commands — commands the AstrBot plugin should forward. Header X-Bridge-Token.
+    /// </summary>
+    [HttpGet("api/bot/commands")]
+    public IActionResult BridgeCommandList()
+    {
+        if (!BridgeRateLimiter.Allow(GetClientIp() ?? "?"))
+            return StatusCode(429, new { success = false, message = "Too many requests." });
+        if (!BridgeAuthorized())
+            return Unauthorized(new { success = false, message = "Invalid bridge token." });
+
+        return Ok(new { success = true, commands = _roomMonitor.BridgeCommands(), prefixCommands = new[] { "#订阅", "#退订" } });
+    }
+
+    /// <summary>
+    ///     POST /webadmin/api/bot/command — the AstrBot plugin forwards one chat message;
+    ///     the reply text is returned for the plugin to send back. Header X-Bridge-Token.
+    ///     Body {"session":"umo","senderId":"...","senderName":"...","text":"#在线状态"}.
+    /// </summary>
+    [HttpPost("api/bot/command")]
+    public IActionResult BridgeCommand([FromBody] JsonElement body)
+    {
+        if (!BridgeRateLimiter.Allow(GetClientIp() ?? "?"))
+            return StatusCode(429, new { success = false, message = "Too many requests." });
+        if (!BridgeAuthorized())
+            return Unauthorized(new { success = false, message = "Invalid bridge token." });
+
+        static string Str(JsonElement b, string name, int max)
+        {
+            var v = b.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() ?? "" : "";
+            return v.Length <= max ? v : v[..max];
+        }
+
+        var session = Str(body, "session", 300);
+        var text = Str(body, "text", 200);
+        var senderId = Str(body, "senderId", 100);
+        var senderName = Str(body, "senderName", 64);
+
+        var reply = _roomMonitor.HandleBridgeCommand(session, senderId, senderName, text);
+        return Ok(new { success = true, handled = reply != null, reply = reply ?? "" });
     }
 
     // ========== Player play-time API ==========

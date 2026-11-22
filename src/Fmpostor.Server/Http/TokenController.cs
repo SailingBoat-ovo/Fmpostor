@@ -139,7 +139,26 @@ public sealed class TokenController : ControllerBase
         // auth session can be matched to the UDP connection exactly, even when many
         // players share one NAT/CDN IP. The IP entries are re-registered with the
         // port so /api/games can hand it out to the client.
-        var deltaPort = _portPool.AllocatePort(puid);
+        // The listener must be running BEFORE the port is handed out: the client connects
+        // to it right after /api/games. A port that cannot be bound (taken by another
+        // program) is marked unusable and the next one is tried; if none works the client
+        // simply uses the main port, exactly like a server without delta ports.
+        var deltaPort = 0;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var candidate = _portPool.AllocatePort(puid);
+            if (candidate <= 0)
+            {
+                break;
+            }
+
+            if (await _deltaListenerManager.StartDeltaListenerAsync(candidate))
+            {
+                deltaPort = candidate;
+                break;
+            }
+        }
+
         if (deltaPort > 0)
         {
             _identityService.RegisterByPort(deltaPort, puid, friendCode);
@@ -150,7 +169,6 @@ public sealed class TokenController : ControllerBase
                 _identityService.Register(remoteIp, puid, friendCode, deltaPort);
             }
 
-            _ = _deltaListenerManager.StartDeltaListenerAsync(deltaPort);
             _logger.LogInformation("[Token] Delta port {Port} allocated for PUID={Puid}", deltaPort, puid);
         }
 

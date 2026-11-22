@@ -11,6 +11,13 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- Smaller memory footprint on Linux servers (no ICU dependency). -->
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Max-800 perf: the relay is latency-light and its heap is small (tens of MB), so
+         workstation (background) GC fits far better than the Web SDK default (server GC = one heap
+         and one GC thread per core). Same behaviour, noticeably less memory and fewer
+         threads on many-core hosts. TieredPGO lets the JIT re-optimise hot relay paths. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
   <PropertyGroup>

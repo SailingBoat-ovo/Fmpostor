@@ -10,9 +10,10 @@ namespace Fmpostor.Server.Net;
 public interface IDeltaListenerManager
 {
     /// <summary>
-    ///     Starts a UDP listener on a specific port.
+    ///     Starts a UDP listener on a specific port. Returns true when a listener is
+    ///     running on the port afterwards (started now or already running).
     /// </summary>
-    ValueTask StartDeltaListenerAsync(int port);
+    ValueTask<bool> StartDeltaListenerAsync(int port);
 
     /// <summary>
     ///     Stops and disposes the UDP listener on a specific port.

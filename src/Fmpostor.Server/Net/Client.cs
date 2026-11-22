@@ -383,6 +383,19 @@ namespace Fmpostor.Server.Net
                     break;
                 }
 
+                case MessageFlags.ReportPlayer:
+                {
+                    // 游戏自带的举报菜单(聊天框旁的按钮)。只要人在房间里就可以举报, 不限房主。
+                    if (!IsPacketAllowed(reader, false, flag))
+                    {
+                        return;
+                    }
+
+                    Message17ReportPlayerC2S.Deserialize(reader, out var targetClientId, out var reason);
+                    await Player!.Game.HandleReportPlayerAsync(Player, targetClientId, reason);
+                    break;
+                }
+
                 case MessageFlags.GetGameListV2:
                 {
                     await DisconnectAsync(DisconnectReason.Custom, DisconnectMessages.UdpMatchmakingUnsupported);
@@ -437,7 +450,7 @@ namespace Fmpostor.Server.Net
                 {
                     // The client never sends over the real disconnect reason so we always assume ExitGame
                     var isRemote = reason == "The remote sent a disconnect request";
-                    await Player.Game.HandleRemovePlayer(Id, isRemote ? DisconnectReason.ExitGame : DisconnectReason.Error);
+                    await Player.Game.HandleRemovePlayer(Id, isRemote ? DisconnectReason.ExitGame : DisconnectReason.Error, voluntaryLeave: isRemote);
                 }
             }
             catch (Exception ex)
