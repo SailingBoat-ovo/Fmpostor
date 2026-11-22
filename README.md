@@ -8,13 +8,17 @@
 
 **帆船的 Impostor 服务端** —— 面向私服运营者的 All-in-one Among Us 服务端。基于 [Impostor](https://github.com/Impostor/Impostor)（GPL-3.0）二次开发，内置 Web 管理面板与全套自动化运营能力。
 
+> [!IMPORTANT]
+> **好友代码依靠网关获取。** 玩家进服时，服务端要用玩家的令牌向 Innersloth 官方接口查询好友代码。Fmpostor 默认通过公共网关 `http://backend.playerinfo.impwm.fcaugame.cn` 查询。
+> 公共网关可能限流、需要密钥或暂时不可用 —— **如果你的服务器取不到好友代码（显示占位符），请自己搭建网关**：网关程序已开源，源码和搭建教程见 👉 **[InnerslothGateway/](InnerslothGateway/)**，搭好后在 `config.json` 的 `WebAdmin` 里填 `InnerslothApiBaseUrl`（网关地址）和 `InnerslothProxyKey`（网关密钥）即可。
+
 > 当前版本：**Max-800.1** · 支持 Among Us **19.0** · 完整更新日志见 [CHANGELOG.md](CHANGELOG.md)
 
 ### ✨ 核心优势
 
 - 🎮 **支持最新 Among Us 19.0**（含新职业 Spirit Guide）
 - 🔌 **断线重连**（NOS 模组）— 掉线后重进同一房间，职业 / 位置 / 任务 / 生死全部恢复；会议中也能重连回来投票；新玩家可中途观战
-- 🪪 **真实好友码** — 自建网关直连官方，好友码 / PUID 非占位符；大厅社交面板（手机按钮）像官方服一样显示所有人的好友代码
+- 🪪 **真实好友码** — 通过网关直连官方（[网关开源，可自建](InnerslothGateway/)），好友码 / PUID 非占位符；大厅社交面板（手机按钮）像官方服一样显示所有人的好友代码
 - 🤖 **AI 管家** — 一句话查数据；Agent 自动执行面板操作；游戏内 `/aichat`
 - 📼 **对局复盘** — 身份分配 / 击杀链 / 投票时间线全存档
 - ⏰ **定时任务 + AI** — 定时发消息、清数据，还能定时让 AI 干活
@@ -141,6 +145,7 @@ dotnet publish src/Fmpostor.Server/Fmpostor.Server.csproj -c Release -r linux-x6
 **Max-800.1-20261122**（最新）
 
 - 🪪 修复好友代码获取：网关地址改用 80 端口（原 58080 端口已不可用）
+- 🔓 好友代码网关程序开源（[InnerslothGateway/](InnerslothGateway/)），附自建教程
 
 **Max-800.0-20261122**
 
@@ -175,13 +180,17 @@ dotnet publish src/Fmpostor.Server/Fmpostor.Server.csproj -c Release -r linux-x6
 
 **Fanchuan's Impostor server**: an all-in-one Among Us server for private-server operators. A fork of [Impostor](https://github.com/Impostor/Impostor) (GPL-3.0) with a built-in web admin panel and a full set of automation for running a community server.
 
+> [!IMPORTANT]
+> **Friend codes are fetched through a gateway.** When a player joins, the server uses their token to look up the friend code at the official Innersloth API. By default Fmpostor goes through the public gateway `http://backend.playerinfo.impwm.fcaugame.cn`.
+> The public gateway may be rate-limited, require a key or be temporarily down. **If your server can't get friend codes (placeholders are shown), host your own gateway**: it is open source, with source and a setup guide in 👉 **[InnerslothGateway/](InnerslothGateway/)**. Then set `InnerslothApiBaseUrl` (gateway address) and `InnerslothProxyKey` (gateway key) under `WebAdmin` in `config.json`.
+
 > Current version: **Max-800.1** · supports Among Us **19.0** · full changelog in [CHANGELOG.md](CHANGELOG.md)
 
 ### ✨ Highlights
 
 - 🎮 **Among Us 19.0 support**, including the new Spirit Guide role
 - 🔌 **Disconnect & reconnect** (NOS mod): rejoin the same room after a drop and get role / position / tasks / alive-or-dead state back, even in the middle of a meeting; new players can join a running round as spectators
-- 🪪 **Real friend codes**: a self-hosted gateway talks to the official API, so friend codes and PUIDs are real, not placeholders. The lobby social panel (phone button) shows everyone's friend code, just like the official servers
+- 🪪 **Real friend codes**: a gateway talks to the official API ([open source, self-hostable](InnerslothGateway/)), so friend codes and PUIDs are real, not placeholders. The lobby social panel (phone button) shows everyone's friend code, just like the official servers
 - 🤖 **AI assistant**: ask about your data in plain language; Agent mode runs panel actions; in-game `/aichat`
 - 📼 **Match replays**: role assignment, kill chains and vote timelines are all archived
 - ⏰ **Scheduled tasks + AI**: send messages, clean data, or have the AI run jobs on a schedule
@@ -291,6 +300,7 @@ Reverse-proxy port 443 to the server's port 22023 with Nginx or Caddy; see the u
 **Max-800.1-20261122** (latest)
 
 - 🪪 Fixed friend-code lookup: the gateway is now reached on port 80 (port 58080 no longer works)
+- 🔓 The friend-code gateway is now open source ([InnerslothGateway/](InnerslothGateway/)), with a self-hosting guide
 
 **Max-800.0-20261122**
 

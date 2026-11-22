@@ -11,6 +11,7 @@
 上一版本：Max-800.0-20261122。可在面板「自动更新」一键升级。
 
 - 🪪 修复好友代码获取失败：默认网关地址由 `http://backend.playerinfo.impwm.fcaugame.cn:58080` 改为 `http://backend.playerinfo.impwm.fcaugame.cn`（80 端口）。在 `config.json` 里自己设置过 `WebAdmin:InnerslothApiBaseUrl` 的不受影响。
+- 🔓 好友代码网关程序开源：源码和自建教程在仓库的 `InnerslothGateway/` 目录，Release 附 Windows / Linux 编译版。公共网关不可用时可以自己搭建。
 
 ### Max-800.0-20261122
 
@@ -192,6 +193,7 @@
 Previous version: Max-800.0-20261122. Upgrade in one click from the panel's **Auto Update** page.
 
 - 🪪 Fixed friend-code lookups failing: the default gateway address changed from `http://backend.playerinfo.impwm.fcaugame.cn:58080` to `http://backend.playerinfo.impwm.fcaugame.cn` (port 80). Servers that set `WebAdmin:InnerslothApiBaseUrl` in `config.json` themselves are not affected.
+- 🔓 The friend-code gateway is now open source: source and a self-hosting guide live in `InnerslothGateway/`, and the release includes Windows / Linux builds. Host your own if the public gateway is unavailable.
 
 ### Max-800.0-20261122
 
